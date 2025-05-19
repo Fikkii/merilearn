@@ -6,7 +6,7 @@ const router = express.Router();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 router.get('/topics', async (req, res) => {
-    const prompt = `Generate a random list of 3 interesting study topics for a student. Just return the topics as a JSON array like ["Topic1", "Topic2", ...]`;
+    const prompt = `Generate a random list of 10 interesting study topics for a student. Just return the topics as a JSON array like ["Topic1", "Topic2", ...]`;
 
   try {
       const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
