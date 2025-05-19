@@ -39,7 +39,7 @@ router.post('/recommendations', async (req, res) => {
       const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
       const fullPrompt = `
-      Based on the topic: "${prompt}", recommend 3 ebook materials.
+      Based on the topic: "${prompt}", make 10 random ebook materials recommendation.
       For each recommendation, include:
       1. title
       2. short description (max 2 sentences)
@@ -52,7 +52,7 @@ router.post('/recommendations', async (req, res) => {
           "description": "Example description",
           "link": "https://www.google.com/search?q=Download+Example+Title+ebook"
         }
-      ]
+      ],
     `;
 
       const result = await model.generateContent(fullPrompt);
