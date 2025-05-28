@@ -72,4 +72,3 @@ router.post('/recommendations', async (req, res) => {
 });
 
 module.exports = router;
-

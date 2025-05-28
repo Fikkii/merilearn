@@ -4,8 +4,6 @@ const router = express.Router();
 const db = require('../db');
 const authenticate = require('../middleware/auth');
 
-// Protect all routes
-router.use(authenticate);
 
 // GET /api/todos
 router.get('/', (req, res) => {
