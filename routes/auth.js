@@ -8,12 +8,14 @@ const router = express.Router();
 
 const authenticate = require('../middleware/auth');
 
+// Fetch HTML Email Template
+const { getTemplate } = require('../utils/emailTemplates');
+
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
 //importing and mounting my nodemailer middleware
 const mailer = require('../middleware/mailer')
 router.use(mailer)
-
 
 // POST /api/auth/register
 router.post('/auth/register', async (req, res) => {
@@ -40,13 +42,13 @@ router.post('/auth/register', async (req, res) => {
 // POST /api/auth/login
 router.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
-  const user = db.prepare('SELECT * FROM students WHERE email = ?').get(email);
+  const user = db.prepare(`SELECT * FROM students WHERE email = ?`).get(email);
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
   const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ token });
+  res.json({ token, 'user': { id: user.id, email: user.email, role: user.role } });
 });
 
 // POST /api/auth/forgot-password
@@ -59,17 +61,21 @@ router.post('/auth/forgot-password', (req, res) => {
   const token = crypto.randomBytes(32).toString('hex');
   const expires = Date.now() + 3600000; // 1 hour
 
+
   db.prepare(`
     UPDATE students SET resetToken = ?, resetTokenExpires = ? WHERE email = ?
   `).run(token, expires, email);
 
   const resetLink = `${process.env.FRONTEND_PASSWORD_RESET_URL}/${token}`;
 
+  const template = getTemplate('reset-password')
+  const html = template.replace('{{resetLink}}', resetLink)
+
   req.mailer.sendMail({
     from: `"MerilLearn Auth" <${process.env.SMTP_USER}>`,
     to: email,
     subject: 'Reset Your Password',
-    html: `<p>Click <a href="${resetLink}">here</a> to reset your password.</p>`,
+    html
   }).then((info) => {
     res.json({ message: 'Reset link sent to student email.', info });
   }).catch(err => {
