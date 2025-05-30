@@ -19,7 +19,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
     email TEXT UNIQUE NOT NULL,
-    role TEXT CHECK(role IN ('student', 'instructor', 'admin')),
+    role TEXT DEFAULT 'student' CHECK(role IN ('student', 'instructor', 'admin')),
     password TEXT NOT NULL,
     resetToken TEXT,
     resetTokenExpires INT,

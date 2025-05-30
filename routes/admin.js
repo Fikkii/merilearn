@@ -8,7 +8,6 @@ const { randomUUID } = require('crypto');
 
 //Middleware to authorize role
 const authorizeRole = (role) => {
-  console.log('Access denied: Insufficient role')
   return (req, res, next) => {
     if (req.user.role !== role) {
       return res.status(403).json({ error: 'Access denied: insufficient role' })
