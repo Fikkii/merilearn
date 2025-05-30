@@ -6,18 +6,6 @@ const axios = require('axios');
 const router = express.Router();
 const { randomUUID } = require('crypto');
 
-//Middleware to authorize role
-const authorizeRole = (role) => {
-  return (req, res, next) => {
-    if (req.user.role !== role) {
-      return res.status(403).json({ error: 'Access denied: insufficient role' })
-    }
-    next()
-  }
-}
-
-router.use(authorizeRole('admin'))
-
 // Create a topic
 router.post('/topics', (req, res) => {
   const { moduleId, title, content, order } = req.body;
