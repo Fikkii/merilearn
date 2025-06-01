@@ -1,5 +1,5 @@
 const express = require('express');
-const { randomUUID } = require('crypto');
+const bcrypt = require('bcryptjs');
 const db = require('../db');
 
 const router = express.Router();
@@ -7,17 +7,18 @@ const router = express.Router();
 const checkEnrollment = require('../middleware/enroll');
 
 router.get('/me', (req, res) => {
-    const stmt = db.prepare('SELECT id, name, email, created_at FROM students WHERE id = ?');
+    const stmt = db.prepare('SELECT u.id, s.fullname, u.email, u.created_at FROM users u JOIN student_profiles s ON s.id=u.id WHERE u.id = ?');
     const student = stmt.get(req.user.id);
+    console.log(student)
     if (!student) return res.status(404).json({ error: 'Student not found' });
     res.json(student);
 });
 
 router.put('/me', async (req, res) => {
-  const { name, email, password } = req.body;
+  const { fullname, password } = req.body;
 
   // At least one field should be present
-  if (!name && !email && !password) {
+  if (!fullname && !password) {
     return res.status(400).json({ error: 'At least one field (name, email, or password) must be provided' });
   }
 
@@ -26,26 +27,25 @@ router.put('/me', async (req, res) => {
     const fields = [];
     const values = [];
 
-    if (name) {
-      fields.push('name = ?');
-      values.push(name);
+    if (fullname) {
+      fields.push('fullname = ?');
+      values.push(fullname);
     }
 
-    if (email) {
-      fields.push('email = ?');
-      values.push(email);
-    }
-
-    if (password) {
-      fields.push('password = ?'); // Note: You should hash this in a real-world app
-      const hashed = await bcrypt.hash(password, 10);
-      values.push(hashed);
-    }
+    const hashed = await bcrypt.hash(password, 10);
 
     values.push(req.user.id); // for WHERE clause
 
+      if(password){
+        db.prepare(`
+          UPDATE users
+          SET password = ?
+          WHERE id = ?
+        `).run(hashed, req.user.id);
+      }
+
     const stmt = db.prepare(`
-      UPDATE students
+      UPDATE student_profiles
       SET ${fields.join(', ')}
       WHERE id = ?
     `);
@@ -72,11 +72,10 @@ router.post('/enrollment', (req, res) => {
     return res.status(400).json({ error: 'Already enrolled in a course' });
   }
 
-  const enrollmentId = randomUUID();
-  db.prepare(`INSERT INTO enrollments (id, student_id, course_id, paid) VALUES (?, ?, ?, ?)`)
-    .run(enrollmentId, req.user.id, courseId, paid ? 1 : 0);
+  db.prepare(`INSERT INTO enrollments (id, student_id, course_id, paid) VALUES (?, ?, ?)`)
+    .run(req.user.id, courseId, paid ? 1 : 0);
 
-  res.json({ message: 'Enrollment successful', enrollmentId });
+  res.json({ message: 'Enrollment successful'});
 });
 
 router.delete('/enrollment', (req, res) => {
@@ -222,7 +221,6 @@ router.get('/project-scores', (req, res) => {
 });
 
 router.post('/project-scores', (req, res) => {
-  const id = randomUUID();
   const { project_id, score, feedback } = req.body;
 
   if (!project_id || score == null) {
@@ -242,10 +240,10 @@ router.post('/project-scores', (req, res) => {
 
     db.prepare(`
       INSERT INTO project_scores (id, student_id, project_id, score, feedback)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, req.user.id, project_id, score, feedback || null);
+      VALUES (?, ?, ?, ?)
+    `).run(req.user.id, project_id, score, feedback || null);
 
-    res.status(201).json({ message: 'Project score created successfully', id });
+    res.status(201).json({ message: 'Project score created successfully'});
   } catch (err) {
     console.error('Error creating project score:', err);
     res.status(500).json({ error: 'Internal server error' });

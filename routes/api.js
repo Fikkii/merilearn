@@ -7,6 +7,8 @@ const axios = require('axios')
 
 const authRoute = require('./auth')
 
+const { checkPermission } = require('../middleware/checkPermission')
+
 router.use('/', authRoute)
 
 // Fetch all courses available
@@ -14,7 +16,7 @@ router.use('/', authRoute)
 router.get('/courses', (req, res) => {
   try {
     const courses = db.prepare(`
-      SELECT id, title, description, amount
+      SELECT id, title, description, price
       FROM courses
       ORDER BY created_at DESC
     `).all();
@@ -40,12 +42,12 @@ router.get('/modules', (req, res) => {
 });
 router.get('/topics', (req, res) => {
   try {
-    const modules = db.prepare(`
-      SELECT t.id, t.title as topic_title, m.title as module_title, c.title as course_title
+    const topics = db.prepare(`
+      SELECT t.id, t.title as topic_title, t.content as topic_content, m.title as module_title, c.title as course_title
       FROM topics t JOIN modules m ON m.id=t.module_id JOIN courses c on c.id=m.course_id
     `).all();
 
-    res.json(modules);
+    res.json(topics);
   } catch (err) {
     console.error('Failed to fetch modules:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -53,12 +55,12 @@ router.get('/topics', (req, res) => {
 });
 router.get('/students', (req, res) => {
   try {
-    const students = db.prepare(`
-      SELECT s.id, s.name as student_name, s.email as student_email
-      FROM students s
+    const users = db.prepare(`
+      SELECT u.id, s.fullname, u.email
+      FROM users u JOIN student_profiles s on s.id=u.id
     `).all();
 
-    res.json(students);
+    res.json(users);
   } catch (err) {
     console.error('Failed to fetch modules:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -67,8 +69,8 @@ router.get('/students', (req, res) => {
 router.get('/enrollments', (req, res) => {
   try {
     const enrollments = db.prepare(`
-      SELECT e.id, e.name as student_name, e.email as student_email
-      FROM enrollments e join students s on s.id=e.student_id join courses c on c.id=e.course_id
+      SELECT e.id, s.fullname as student_name, u.email as student_email
+      FROM enrollments e join users u on u.id=e.student_id join courses c on c.id=e.course_id join student_profiles s on s.id=u.id
     `).all();
 
     res.json(enrollments);
@@ -86,7 +88,7 @@ router.get('/projects', (req, res) => {
 
     res.json(projects);
   } catch (err) {
-    console.error('Failed to fetch modules:', err);
+    console.error('Failed to fetch projects:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

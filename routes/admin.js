@@ -3,23 +3,26 @@ require('dotenv').config()
 const express = require('express');
 const db = require('../db');
 const axios = require('axios');
+
+const {checkPermission} = require('../middleware/checkPermission');
+
 const router = express.Router();
-const { randomUUID } = require('crypto');
+
+router.use(checkPermission('manage', 'all'))
 
 // Create a topic
 router.post('/topics', (req, res) => {
-  const { moduleId, title, content, order } = req.body;
+  const { moduleId, title, content } = req.body;
   if (!moduleId || !title || !content ) {
     return res.status(400).json({ error: 'moduleId, title, and content are required' });
   }
 
-  const id = randomUUID();
-  db.prepare(`
-    INSERT INTO topics (id, module_id, title, content)
-    VALUES (?, ?, ?, ?)
-  `).run(id, moduleId, title, content);
+  const query = db.prepare(`
+    INSERT INTO topics (module_id, title, content)
+    VALUES (?, ?, ?)
+  `).run(moduleId, title, content);
 
-  res.status(201).json({ message: 'Topic created', topicId: id });
+  res.status(201).json({ message: 'Topic created', topicId: query.lastInsertRowid });
 });
 
 //Delete a Topic
@@ -35,14 +38,13 @@ router.delete('/topics/:id', (req, res) => {
 
 // Create a course
 router.post('/courses', (req, res) => {
-  const { title, description } = req.body;
+  const { cover_img_url, title, description } = req.body;
   if (!title) return res.status(400).json({ error: 'title is required' });
 
-  const id = randomUUID();
-  db.prepare('INSERT INTO courses (id, title, description) VALUES (?, ?, ?)')
-    .run(id, title, description || null);
+  const query = db.prepare('INSERT INTO courses (title, cover_img_url, description) VALUES (?, ?, ?)')
+    .run(title, cover_img_url, description || null);
 
-  res.status(201).json({ message: 'Course created', courseId: id });
+  res.status(201).json({ message: 'Course created', courseId: query.lastInsertRowid });
 });
 
 //Delete a course
@@ -58,18 +60,17 @@ router.delete('/courses/:id', (req, res) => {
 
 // Create a module
 router.post('/modules', (req, res) => {
-  const { courseId, title, order } = req.body;
+  const { courseId, title} = req.body;
   if (!courseId || !title ) {
-    return res.status(400).json({ error: 'courseId, title, order, required' });
+    return res.status(400).json({ error: 'courseId, title, required' });
   }
 
-  const id = randomUUID();
-  db.prepare(`
-    INSERT INTO modules (id, course_id, title, "order")
-    VALUES (?, ?, ?, ?)
-  `).run(id, courseId, title, order );
+  const query = db.prepare(`
+    INSERT INTO modules (course_id, title)
+    VALUES (?, ?)
+  `).run(courseId, title);
 
-  res.status(201).json({ message: 'Module created', moduleId: id });
+  res.status(201).json({ message: 'Module created', moduleId: query.lastInsertRowid });
 });
 
 // Delete a module
@@ -88,7 +89,7 @@ router.delete('/modules/:id', (req, res) => {
 
 //Edit Module
 router.put('/modules/:id', (req, res) => {
-  const { courseId, title, order, id } = req.body;
+  const { courseId, title, id } = req.body;
 
   // At least one field should be present
   if (!courseId || !title || !id ) {
@@ -102,17 +103,12 @@ router.put('/modules/:id', (req, res) => {
 
     if (courseId) {
       fields.push('course_id = ?');
-      values.push(course_id);
+      values.push(courseId);
     }
 
     if (title) {
       fields.push('title = ?');
       values.push(title);
-    }
-
-    if (order) {
-      fields.push('order = ?');
-      values.push(order);
     }
 
     values.push(req.user.id); // for WHERE clause
@@ -148,12 +144,11 @@ router.post('/projects', (req, res) => {
   }
 
   try {
-    const id = randomUUID();
 
     db.prepare(`
-      INSERT INTO projects (id, title, instructions)
-      VALUES (?, ?, ?)
-    `).run(id, title, instructions || null);
+      INSERT INTO projects (title, instructions)
+      VALUES (?, ?)
+    `).run(title, instructions || null);
 
     res.status(201).json({ message: 'Project created successfully', id });
   } catch (err) {
@@ -184,10 +179,10 @@ router.get('/student/modules', (req, res) => {
 
     // Fetch modules belonging to that course, ordered by their order
     const modules = db.prepare(`
-      SELECT id, title, "order"
+      SELECT id, title
       FROM modules
       WHERE course_id = ?
-      ORDER BY "order"
+      ORDER BY created_at DESC
     `).all(req.user.course_id);
 
     res.json({ modules });
