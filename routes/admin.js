@@ -8,8 +8,6 @@ const {checkPermission} = require('../middleware/checkPermission');
 
 const router = express.Router();
 
-router.use(checkPermission('manage', 'all'))
-
 // Create a topic
 router.post('/topics', (req, res) => {
   const { moduleId, title, content } = req.body;

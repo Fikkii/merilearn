@@ -13,7 +13,6 @@ const PORT = process.env.PORT || 3001;
 preloadEmailTemplates();
 
 app.use(cors());
-app.options('*', cors());
 
 app.use(express.json());
 
