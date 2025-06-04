@@ -6,6 +6,10 @@ const axios = require('axios');
 
 const {checkPermission} = require('../middleware/checkPermission');
 
+//Middleware to upload file
+const { useUploader } = require('../middleware/upload.js');
+
+
 const router = express.Router();
 
 // Create a topic
@@ -35,12 +39,13 @@ router.delete('/topics/:id', (req, res) => {
 });
 
 // Create a course
-router.post('/courses', (req, res) => {
+router.post('/courses', useUploader('/uploads/courses'), (req, res) => {
+
   const { cover_img_url, title, description } = req.body;
   if (!title) return res.status(400).json({ error: 'title is required' });
 
   const query = db.prepare('INSERT INTO courses (title, cover_img_url, description) VALUES (?, ?, ?)')
-    .run(title, cover_img_url, description || null);
+    .run(title, req.file.uploadUrl, description || null);
 
   res.status(201).json({ message: 'Course created', courseId: query.lastInsertRowid });
 });
@@ -135,18 +140,18 @@ router.put('/modules/:id', (req, res) => {
 
 //create a project
 router.post('/projects', (req, res) => {
-  const { title, instructions } = req.body;
+  const { title, moduleId, instructions } = req.body;
 
-  if (!title) {
-    return res.status(400).json({ error: 'module_id and title are required' });
+  if (!title, !moduleId, !instructions) {
+    return res.status(400).json({ error: 'module_id, instructions and title are required' });
   }
 
   try {
 
     db.prepare(`
-      INSERT INTO projects (title, instructions)
-      VALUES (?, ?)
-    `).run(title, instructions || null);
+      INSERT INTO projects (title, module_id, instructions)
+      VALUES (?, ?, ?)
+    `).run(title, moduleId, instructions || null);
 
     res.status(201).json({ message: 'Project created successfully', id });
   } catch (err) {

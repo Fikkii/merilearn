@@ -22,7 +22,7 @@ router.get('/courses/details', (req, res) => {
     `).all();
 
     const courses = db.prepare(`
-      SELECT id, title, description, price
+      SELECT id, cover_img_url, title, description, price
       FROM courses
       ORDER BY created_at DESC
     `).all();
@@ -60,7 +60,7 @@ router.get('/courses/details', (req, res) => {
 router.get('/courses', (req, res) => {
   try {
     const courses = db.prepare(`
-      SELECT id, title, description, price
+      SELECT id, title, cover_img_url, description, price
       FROM courses
       ORDER BY created_at DESC
     `).all();
@@ -253,7 +253,6 @@ router.get('/total/instructors', (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 })
-
 
 //leaderboard courses
 router.get('/leaderboard/courses', (req, res) => {
