@@ -1,6 +1,7 @@
 // server.js
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const apiRoutes = require('./routes/api');
 const ebookRoutes = require('./routes/ebook');
 
@@ -18,6 +19,7 @@ preloadEmailTemplates();
 app.use(cors());
 
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.post('/upload', useUploader(),(req, res) => {
   if (!req.file) {
@@ -35,7 +37,6 @@ app.get('/courses/details', (req, res) => {
     const modules = db.prepare(`
       SELECT *
       FROM modules
-      ORDER BY created_at DESC
     `).all();
 
     const courses = db.prepare(`
@@ -46,30 +47,34 @@ app.get('/courses/details', (req, res) => {
 
     const topicStmt = db.prepare(`
       SELECT *
-      FROM topics WHERE id=?
-      ORDER BY created_at DESC
-    `);
+      FROM topics
+    `).all();
 
-      const modulesWithTopics = modules.map((value) => ({
-          ...value,
-         topics: topicStmt.all(value.id)
-      }))
+      modulesWithTopics = []
+      modules.map((value) => {
+          const filteredTopics = topicStmt.filter((topic) =>
+              topic.module_id == value.id
+          )
 
+          modulesWithTopics.push({ ...value, topics: filteredTopics })
 
-      const coursesWithModules = courses.map((value) => {
-          const data = []
-          modulesWithTopics.forEach(mod => {
-              if(mod.id == value.id){
-                  data.push({ ...value, modules: mod })
-              }
-          })
-          return data
       })
 
-    res.json(...coursesWithModules);
+      const courseDetail = []
+
+      courses.map((value) => {
+
+          const filteredModules = modulesWithTopics.filter((mod) =>
+              mod.course_id == value.id
+          )
+
+          courseDetail.push({ ...value, modules: filteredModules })
+      })
+
+      res.json(courseDetail);
   } catch (err) {
-    console.error('Failed to fetch courses:', err);
-    res.status(500).json({ error: 'Internal server error' });
+      console.error('Failed to fetch courses:', err);
+      res.status(500).json({ error: 'Internal server error' });
   }
 
 })
@@ -78,6 +83,6 @@ app.use('/api', apiRoutes);
 app.use('/ebooks', ebookRoutes);
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://localhost:${PORT}`);
 });
 
