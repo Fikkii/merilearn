@@ -41,11 +41,11 @@ router.delete('/topics/:id', (req, res) => {
 // Create a course
 router.post('/courses', useUploader('/uploads/courses'), (req, res) => {
 
-  const { cover_img_url, title, description } = req.body;
+  const { title, price, description } = req.body;
   if (!title) return res.status(400).json({ error: 'title is required' });
 
-  const query = db.prepare('INSERT INTO courses (title, cover_img_url, description) VALUES (?, ?, ?)')
-    .run(title, req.file.uploadUrl, description || null);
+  const query = db.prepare('INSERT INTO courses (title, cover_img_url, description, price) VALUES (?, ?, ?, ?)')
+    .run(title, req.file.uploadUrl, description || null, price);
 
   res.status(201).json({ message: 'Course created', courseId: query.lastInsertRowid });
 });

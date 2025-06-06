@@ -75,7 +75,7 @@ router.get('/courses', (req, res) => {
 router.get('/modules',(req, res) => {
   try {
     const modules = db.prepare(`
-      SELECT m.id, m.title as module_title, c.title as course_title
+      SELECT m.id, m.title, c.title as course_title
       FROM modules m JOIN courses c ON c.id=m.course_id
     `).all();
 
