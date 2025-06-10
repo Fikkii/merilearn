@@ -11,7 +11,7 @@ const { authenticate, googleVerification } = require('../middleware/auth');
 // Fetch HTML Email Template
 const { getTemplate } = require('../utils/emailTemplates');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'secret';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 //importing and mounting my nodemailer middleware
 const mailer = require('../middleware/mailer')
@@ -22,22 +22,22 @@ router.post('/auth/google', googleVerification, async (req, res) => {
   const google = req.google;
 
   //add user to database if not exists
-  const user = db.prepare('SELECT * FROM users u JOIN roles r ON r.id=u.role_id WHERE email = ?').get(google.email);
+  const user = db.prepare(`SELECT u.id as id, u.email as email, r.role as role, u.password as password FROM users u JOIN roles r ON r.id=u.role_id WHERE email = ?`).get(google.email);
 
   if(!user){
       const role = db.prepare("select * from roles where role = ?").get('student')
       const role_id = role.id
 
       //Insert user into database
-      const stmt = db.prepare('INSERT INTO users (email, role_id, provider) VALUES (?, ?, ?)');
-      const info = stmt.run(google.email, role_id, 'google');
+      const user = db.prepare('INSERT INTO users (email, role_id, provider) VALUES (?, ?, ?)');
+      const info = user.run(google.email, role_id, 'google');
 
       db.prepare('INSERT INTO student_profiles (id, fullname) VALUES (?, ?)').run(info.lastInsertRowid, google.name);
-      const token = jwt.sign({ id: info.lastInsertRowid, email: google.email, role: role.name }, JWT_SECRET, { expiresIn: '7d' });
+      const token = jwt.sign({ id: info.lastInsertRowid, email: user.email, role: user.role }, JWT_SECRET);
       res.json({ token, user });
   }
 
-  const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+  const token = jwt.sign({ id: user.id, email: google.email, role: user.role }, JWT_SECRET);
   res.status(200).json({ token, 'user': { id: user.id, email: user.email, role: user.role } });
 });
 
@@ -61,7 +61,7 @@ router.post('/auth/register', async (req, res) => {
     const stmt = db.prepare('INSERT INTO users (email, role_id, password) VALUES (?, ?, ?)');
     const info = stmt.run(email, role_id, hashed);
     db.prepare('INSERT INTO student_profiles (id) VALUES (?)').run(info.lastInsertRowid);
-    const token = jwt.sign({ id: info.lastInsertRowid, email, role: role.name }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: info.lastInsertRowid, email, role: role.name }, JWT_SECRET);
     res.json({ token });
   } catch (err) {
       console.log(err)
@@ -72,12 +72,12 @@ router.post('/auth/register', async (req, res) => {
 // POST /api/auth/login
 router.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
-  const user = db.prepare(`SELECT * FROM users u JOIN roles r ON r.id=u.role_id WHERE email = ?`).get(email);
+  const user = db.prepare(`SELECT u.id as id, u.email as email, r.role as role, u.password as password FROM users u JOIN roles r ON r.id=u.role_id WHERE email = ?`).get(email);
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
-  const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+  const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET);
   res.json({ token, 'user': { id: user.id, email: user.email, role: user.role } });
 });
 
@@ -133,9 +133,12 @@ router.post('/auth/reset-password', async (req, res) => {
   res.json({ message: 'Student password has been successfully reset.' });
 });
 
+//This route is used to for the chat section in the Frontend App powered by Gemini
+const chatRoute = require('./chat');
+router.use('/chat', chatRoute);
+
 // Checking if user is authenticated for the following routes...
 const todosRoutes = require('./todos');
-const chatRoute = require('./chat');
 const ebookRoutes = require('./ebook');
 const quizRoutes = require('./quiz.js');
 const studentRoutes = require('./student.js');
@@ -145,7 +148,6 @@ const adminRoutes = require('./admin.js');
 // Protect all routes
 router.use(authenticate);
 router.use('/todos', todosRoutes);
-router.use('/chat', chatRoute);
 router.use('/ebooks', ebookRoutes);
 router.use('/student', studentRoutes);
 router.use('/quiz', quizRoutes);

@@ -35,11 +35,12 @@ function authenticate(req, res, next){
 
   const token = authHeader.split(' ')[1];
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
     req.user = payload;
     req.ability = defineAbilitiesFor(req.user);
     next();
-  } catch {
+  } catch(e) {
+    console.log(e)
     return res.status(403).json({ error: 'Invalid token' });
   }
 };

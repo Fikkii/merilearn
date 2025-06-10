@@ -16,7 +16,7 @@ router.post('/', async (req, res) => {
     const chat = model.startChat({
       history: history.map(h => ({
         role: h.role,
-        parts: [{ text: h.content }]
+        parts: [{ text: `${h.content}, render out the output in html` }]
       }))
     });
 

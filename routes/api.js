@@ -243,7 +243,7 @@ router.get('/total/instructors', (req, res) => {
   try {
     const instructors = db.prepare(`
       SELECT count(*) as total
-      FROM instructors
+      FROM instructor_profiles
       ORDER BY created_at DESC
     `).all();
 

@@ -6,6 +6,7 @@ const router = express.Router();
 
 const checkEnrollment = require('../middleware/enroll');
 
+//user profile
 router.get('/me', (req, res) => {
     const stmt = db.prepare('SELECT u.id, s.fullname, u.email, u.created_at FROM users u JOIN student_profiles s ON s.id=u.id WHERE u.id = ?');
     const student = stmt.get(req.user.id);
@@ -63,17 +64,25 @@ router.put('/me', async (req, res) => {
   }
 });
 
+//user metrics
+router.get('/metrics', (req, res) => {
+    const stmt = db.prepare('SELECT c.title FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE student_id = ?');
+    const student = stmt.get(req.user.id);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    res.json(student);
+});
+
 // --- ENROLLMENTS ---
 router.post('/enrollment', (req, res) => {
-  const { courseId, paid } = req.body;
+  const { courseId } = req.body;
   if (!courseId) return res.status(400).json({ error: 'courseId is required' });
 
   if (req.user.course_id) {
     return res.status(400).json({ error: 'Already enrolled in a course' });
   }
 
-  db.prepare(`INSERT INTO enrollments (id, student_id, course_id, paid) VALUES (?, ?, ?)`)
-    .run(req.user.id, courseId, paid ? 1 : 0);
+  db.prepare(`INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)`)
+    .run(req.user.id, courseId);
 
   res.json({ message: 'Enrollment successful'});
 });
@@ -96,18 +105,16 @@ router.get('/course', (req, res) => {
   try {
     // Get modules for the course
     const modules = db.prepare(`
-      SELECT id, title, "order"
+      SELECT id, title
       FROM modules
       WHERE course_id = ?
-      ORDER BY "order"
     `).all(req.user.course_id);
 
     // Get topics for each module
     const topicStmt = db.prepare(`
-      SELECT id, module_id, title, content, "order", completed
+      SELECT id, module_id, title, content
       FROM topics
       WHERE module_id = ?
-      ORDER BY "order"
     `);
 
     const modulesWithTopics = modules.map(mod => ({
@@ -142,7 +149,6 @@ router.get('/topic', (req, res) => {
         t.id,
         t.title,
         t.content,
-        t.completed,
         m.course_id
       FROM topics t
       JOIN modules m ON t.module_id = m.id
@@ -259,7 +265,6 @@ router.get('/projects', (req, res) => {
         p.title,
         p.instructions
       FROM modules m JOIN projects p ON p.id = m.project_id WHERE course_id = ?
-      ORDER BY m."order"
     `).all(req.user.course_id);
 
     res.json({ projects });
