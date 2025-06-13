@@ -4,6 +4,9 @@ const db = require('../db');
 
 const router = express.Router();
 
+// Fetch HTML Email Template
+const { getTemplate } = require('../utils/emailTemplates');
+
 const checkEnrollment = require('../middleware/enroll');
 
 //user profile
@@ -77,12 +80,25 @@ router.post('/enrollment', (req, res) => {
   const { courseId } = req.body;
   if (!courseId) return res.status(400).json({ error: 'courseId is required' });
 
+    const user = db.prepare(`SELECT p.fullname as fullname, u.email as email FROM student_profiles p JOIN users u ON u.id = p.id WHERE u.id = ?`).get(req.user.id)
+
+  const html = getTemplate('enroll-welcome')
+
   if (req.user.course_id) {
     return res.status(400).json({ error: 'Already enrolled in a course' });
   }
 
   db.prepare(`INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)`)
     .run(req.user.id, courseId);
+
+  req.mailer.sendMail({
+    from: `"MerilLearn Course Enrollment Successful" <${process.env.SMTP_USER}>`,
+    to: user.email,
+    subject: 'Congratulations on Enrolling, We are pleased to have you...',
+    html
+  }).catch(err => {
+    console.error(err);
+  });
 
   res.json({ message: 'Enrollment successful'});
 });
@@ -105,7 +121,7 @@ router.get('/course', (req, res) => {
   try {
     // Get modules for the course
     const modules = db.prepare(`
-      SELECT id, title
+      SELECT id, title, active
       FROM modules
       WHERE course_id = ?
     `).all(req.user.course_id);
@@ -135,6 +151,7 @@ router.get('/course', (req, res) => {
   }
 });
 
+//fetch topic based on params
 router.get('/topic', (req, res) => {
   const topicId = req.query.topicId;
 
@@ -149,7 +166,9 @@ router.get('/topic', (req, res) => {
         t.id,
         t.title,
         t.content,
-        m.course_id
+        t.recommended_video as video,
+        m.course_id,
+        m.title as module_title
       FROM topics t
       JOIN modules m ON t.module_id = m.id
       WHERE t.id = ?
@@ -168,6 +187,34 @@ router.get('/topic', (req, res) => {
 
   } catch (err) {
     console.error('Error fetching topic:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+//fetch project based on params
+router.get('/project', (req, res) => {
+  const projectId= req.query.projectId;
+
+  if (!projectId) {
+    return res.status(400).json({ error: 'Missing projectId in query.' });
+  }
+
+  try {
+    // Fetch topic and its module details
+    const project = db.prepare(`
+      SELECT p.id, p.title, p.instructions, p.rubric, m.id as module_id
+      FROM projects p JOIN modules m ON m.id=p.module_id where p.id = ?
+    `).get(projectId);
+
+    if (!project) {
+      return res.status(404).json({ error: 'project not found' });
+    }
+
+    res.json({ project });
+
+  } catch (err) {
+    console.error('Error fetching project :', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

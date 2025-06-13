@@ -62,6 +62,19 @@ router.post('/auth/register', async (req, res) => {
     const info = stmt.run(email, role_id, hashed);
     db.prepare('INSERT INTO student_profiles (id) VALUES (?)').run(info.lastInsertRowid);
     const token = jwt.sign({ id: info.lastInsertRowid, email, role: role.name }, JWT_SECRET);
+
+      //Send an HTML informing them of their account activation
+      const template = getTemplate('signup-welcome')
+      const html = template.replace('{{resetLink}}', resetLink)
+
+      req.mailer.sendMail({
+        from: `"Welcome to MeriLearn" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: 'Account Creation succssfull, Thus the journey begins',
+        html
+      }).catch(err => {
+        console.error(err);
+      });
     res.json({ token });
   } catch (err) {
       console.log(err)

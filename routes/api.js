@@ -6,10 +6,12 @@ const db = require('../db')
 const axios = require('axios')
 
 const authRoute = require('./auth')
-
-const { checkPermission, authenticate } = require('../middleware/checkPermission')
+const peerGroups = require('./peerGroup')
+const gradeRoute = require('./grade')
 
 router.use('/', authRoute)
+router.use('/peer', peerGroups)
+router.use('/grade', gradeRoute)
 
 // Fetch all courses available
 // This is the only unprotected route in the server since it will be used at the frontend
@@ -72,10 +74,43 @@ router.get('/courses', (req, res) => {
   }
 });
 
+// Fetch Courses based on ID
+router.get('/courses/:id', (req, res) => {
+  const { id } = req.params
+  try {
+    const courses = db.prepare(`
+      SELECT id, title, cover_img_url, description, price
+      FROM courses WHERE id = ?
+    `).get(id);
+
+    res.json(courses);
+  } catch (err) {
+    console.error('Failed to fetch courses:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+//Fetch Modules based on ID
+router.get('/modules/:id',(req, res) => {
+    const { id } = req.params
+  try {
+    const modules = db.prepare(`
+      SELECT m.id, m.title, c.title as course_title, c.id as courseId, c.active as active
+      FROM modules m JOIN courses c ON c.id=m.course_id WHERE m.id = ?
+    `).get(id);
+
+    res.json(modules);
+  } catch (err) {
+    console.error('Failed to fetch modules:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+//Fetch Modules
 router.get('/modules',(req, res) => {
   try {
     const modules = db.prepare(`
-      SELECT m.id, m.title, c.title as course_title
+      SELECT m.id, m.title, c.title as course_title, m.active as status
       FROM modules m JOIN courses c ON c.id=m.course_id
     `).all();
 
@@ -86,12 +121,29 @@ router.get('/modules',(req, res) => {
   }
 });
 
+//Fetch all Topics
 router.get('/topics', (req, res) => {
   try {
     const topics = db.prepare(`
-      SELECT t.id, t.title as topic_title, t.content as topic_content, m.title as module_title, c.title as course_title
+      SELECT t.id, t.title as topic_title, t.content as topic_content, t.recommended_video as yVideoLink, m.title as module_title, c.title as course_title
       FROM topics t JOIN modules m ON m.id=t.module_id JOIN courses c on c.id=m.course_id
     `).all();
+
+    res.json(topics);
+  } catch (err) {
+    console.error('Failed to fetch modules:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+//Fetch single topic
+router.get('/topics/:id', (req, res) => {
+    const { id } = req.params
+  try {
+    const topics = db.prepare(`
+      SELECT t.id, t.title as title, t.content as topic_content, t.recommended_video as recommended_video, m.title as module_title, c.title as course_title, m.id as moduleId
+      FROM topics t JOIN modules m ON m.id=t.module_id JOIN courses c on c.id=m.course_id WHERE t.id = ?
+    `).get(id);
 
     res.json(topics);
   } catch (err) {
@@ -128,12 +180,30 @@ router.get('/enrollments',(req, res) => {
   }
 });
 
+// Fetch all projects
 router.get('/projects', (req, res) => {
   try {
     const projects = db.prepare(`
-      SELECT id, title, instructions
-      FROM projects
+      SELECT p.id, p.title, p.instructions, p.rubric, m.id as module_id
+      FROM projects p JOIN modules m ON m.id=p.module_id
     `).all();
+
+    res.json(projects);
+  } catch (err) {
+    console.error('Failed to fetch projects:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Fetch single project
+router.get('/projects/:id', (req, res) => {
+  const { id } = req.params
+
+  try {
+    const projects = db.prepare(`
+      SELECT p.id, p.title, p.instructions, m.id as moduleId, p.rubric as rubric
+      FROM projects p JOIN modules m ON m.id = p.id WHERE p.id = ?
+    `).get(id);
 
     res.json(projects);
   } catch (err) {
@@ -228,7 +298,6 @@ router.get('/total/enrollments', (req, res) => {
     const enrollments = db.prepare(`
       SELECT count(*) as total
       FROM enrollments
-      ORDER BY created_at DESC
     `).all();
 
     res.json({ total_enrollments: enrollments[0].total });
@@ -270,6 +339,52 @@ router.get('/leaderboard/courses', (req, res) => {
   }
 })
 
+// Get all notifications
+router.get('/notifications', (req, res) => {
+  const notifications = db.prepare('SELECT * FROM notification ORDER BY createdat DESC').all();
+  res.json(notifications);
+});
+
+// Get a single notification
+router.get('/notifications/:id', (req, res) => {
+  const notification = db.prepare('SELECT * FROM notification WHERE id = ?').get(req.params.id);
+  if (!notification) return res.status(404).json({ error: 'Not found' });
+  res.json(notification);
+});
+
+// Create a notification
+router.post('/notifications', (req, res) => {
+  const { title } = req.body;
+  if (!title) return res.status(400).json({ error: 'Title is required' });
+
+  const stmt = db.prepare('INSERT INTO notification (title) VALUES (?)');
+  const result = stmt.run(title);
+  const newNotification = db.prepare('SELECT * FROM notification WHERE id = ?').get(result.lastInsertRowid);
+  res.status(201).json(newNotification);
+});
+//
+// Update a notification
+router.put('/notifications/:id', (req, res) => {
+  const { title } = req.body;
+  const stmt = db.prepare('UPDATE notification SET title = ? WHERE id = ?');
+  const result = stmt.run(title, req.params.id);
+
+  if (result.changes === 0) return res.status(404).json({ error: 'Not found' });
+
+  const updated = db.prepare('SELECT * FROM notification WHERE id = ?').get(req.params.id);
+  res.json(updated);
+});
+
+// Delete a notification
+router.delete('/notifications/:id', (req, res) => {
+  const stmt = db.prepare('DELETE FROM notification WHERE id = ?');
+  const result = stmt.run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Not found' });
+
+  res.status(204).send();
+});
+
+//Paystack Reference checker
 router.get('/verify/:reference',async (req, res) => {
   const reference = req.params.reference
 
