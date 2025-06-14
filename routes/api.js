@@ -200,214 +200,222 @@ router.get('/projects/:id', (req, res) => {
   const { id } = req.params
 
   try {
-    const projects = db.prepare(`
+    let projects = db.prepare(`
       SELECT p.id, p.title, p.instructions, m.id as moduleId, p.rubric as rubric
       FROM projects p JOIN modules m ON m.id = p.id WHERE p.id = ?
     `).get(id);
 
-    res.json(projects);
+    //join project evaluation if it exists
+      const stmt = db.prepare(`SELECT * FROM evaluations WHERE project_id = ? AND student_id = ?`)
+      let rows = stmt.get(id, req.user.id)
+
+      rows.feedback = JSON.parse(rows.feedback) // Convert from string to array
+
+      projects.evaluation = rows
+
+      res.json(projects);
   } catch (err) {
-    console.error('Failed to fetch projects:', err);
-    res.status(500).json({ error: 'Internal server error' });
+      console.error('Failed to fetch projects:', err);
+      res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 //total courses
 router.get('/total/courses', (req, res) => {
-  try {
-    const courses = db.prepare(`
-      SELECT count(*) as total
-      FROM courses
-      ORDER BY created_at DESC
-    `).all();
+    try {
+        const courses = db.prepare(`
+        SELECT count(*) as total
+        FROM courses
+        ORDER BY created_at DESC
+        `).all();
 
     res.json({ total_courses: courses[0].total });
   } catch (err) {
-    console.error('Failed to fetch total courses:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+            console.error('Failed to fetch total courses:', err);
+            res.status(500).json({ error: 'Internal server error' });
+        }
 })
 
 //total modules
 router.get('/total/modules', (req, res) => {
-  try {
-    const modules = db.prepare(`
+    try {
+        const modules = db.prepare(`
       SELECT count(*) as total
       FROM modules
       ORDER BY created_at DESC
     `).all();
 
-    res.json({ total_modules: modules[0].total });
-  } catch (err) {
-    console.error('Failed to fetch total modules:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.json({ total_modules: modules[0].total });
+    } catch (err) {
+        console.error('Failed to fetch total modules:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 })
 
 //total users
 router.get('/total/users', (req, res) => {
-  try {
-    const users = db.prepare(`
+    try {
+        const users = db.prepare(`
       SELECT count(*) as total
       FROM users
       ORDER BY created_at DESC
     `).all();
 
-    res.json({ total_users: users[0].total });
-  } catch (err) {
-    console.error('Failed to fetch total users:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.json({ total_users: users[0].total });
+    } catch (err) {
+        console.error('Failed to fetch total users:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 })
 
 //total projects
 router.get('/total/projects', (req, res) => {
-  try {
-    const projects = db.prepare(`
+    try {
+        const projects = db.prepare(`
       SELECT count(*) as total
       FROM projects
       ORDER BY created_at DESC
     `).all();
 
-    res.json({ total_projects: projects[0].total });
-  } catch (err) {
-    console.error('Failed to fetch total projects:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.json({ total_projects: projects[0].total });
+    } catch (err) {
+        console.error('Failed to fetch total projects:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 })
 
 //total topics
 router.get('/total/topics', (req, res) => {
-  try {
-    const topics = db.prepare(`
+    try {
+        const topics = db.prepare(`
       SELECT count(*) as total
       FROM topics
       ORDER BY created_at DESC
     `).all();
 
-    res.json({ total_topics: topics[0].total });
-  } catch (err) {
-    console.error('Failed to fetch total topics:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.json({ total_topics: topics[0].total });
+    } catch (err) {
+        console.error('Failed to fetch total topics:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 })
 
 //total enrollments
 router.get('/total/enrollments', (req, res) => {
-  try {
-    const enrollments = db.prepare(`
+    try {
+        const enrollments = db.prepare(`
       SELECT count(*) as total
       FROM enrollments
     `).all();
 
-    res.json({ total_enrollments: enrollments[0].total });
-  } catch (err) {
-    console.error('Failed to fetch total enrollments:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.json({ total_enrollments: enrollments[0].total });
+    } catch (err) {
+        console.error('Failed to fetch total enrollments:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 })
 
 //total instructors
 router.get('/total/instructors', (req, res) => {
-  try {
-    const instructors = db.prepare(`
+    try {
+        const instructors = db.prepare(`
       SELECT count(*) as total
       FROM instructor_profiles
       ORDER BY created_at DESC
     `).all();
 
-    res.json({ total_instructors: instructors[0].total });
-  } catch (err) {
-    console.error('Failed to fetch total instructors:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.json({ total_instructors: instructors[0].total });
+    } catch (err) {
+        console.error('Failed to fetch total instructors:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 })
 
 //leaderboard courses
 router.get('/leaderboard/courses', (req, res) => {
-  try {
-    const courses = db.prepare(`
+    try {
+        const courses = db.prepare(`
       SELECT title, count(*) as total
       FROM courses c JOIN enrollments e ON e.course_id=c.id
       ORDER BY created_at DESC limit 3
     `).all();
 
-    res.json({ courses });
-  } catch (err) {
-    console.error('Failed to fetch total courses:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.json({ courses });
+    } catch (err) {
+        console.error('Failed to fetch total courses:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 })
 
 // Get all notifications
 router.get('/notifications', (req, res) => {
-  const notifications = db.prepare('SELECT * FROM notification ORDER BY createdat DESC').all();
-  res.json(notifications);
+    const notifications = db.prepare('SELECT * FROM notification ORDER BY createdat DESC').all();
+    res.json(notifications);
 });
 
 // Get a single notification
 router.get('/notifications/:id', (req, res) => {
-  const notification = db.prepare('SELECT * FROM notification WHERE id = ?').get(req.params.id);
-  if (!notification) return res.status(404).json({ error: 'Not found' });
-  res.json(notification);
+    const notification = db.prepare('SELECT * FROM notification WHERE id = ?').get(req.params.id);
+    if (!notification) return res.status(404).json({ error: 'Not found' });
+    res.json(notification);
 });
 
 // Create a notification
 router.post('/notifications', (req, res) => {
-  const { title } = req.body;
-  if (!title) return res.status(400).json({ error: 'Title is required' });
+    const { title } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title is required' });
 
-  const stmt = db.prepare('INSERT INTO notification (title) VALUES (?)');
-  const result = stmt.run(title);
-  const newNotification = db.prepare('SELECT * FROM notification WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(newNotification);
+    const stmt = db.prepare('INSERT INTO notification (title) VALUES (?)');
+    const result = stmt.run(title);
+    const newNotification = db.prepare('SELECT * FROM notification WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json(newNotification);
 });
 //
 // Update a notification
 router.put('/notifications/:id', (req, res) => {
-  const { title } = req.body;
-  const stmt = db.prepare('UPDATE notification SET title = ? WHERE id = ?');
-  const result = stmt.run(title, req.params.id);
+    const { title } = req.body;
+    const stmt = db.prepare('UPDATE notification SET title = ? WHERE id = ?');
+    const result = stmt.run(title, req.params.id);
 
-  if (result.changes === 0) return res.status(404).json({ error: 'Not found' });
+    if (result.changes === 0) return res.status(404).json({ error: 'Not found' });
 
-  const updated = db.prepare('SELECT * FROM notification WHERE id = ?').get(req.params.id);
-  res.json(updated);
+    const updated = db.prepare('SELECT * FROM notification WHERE id = ?').get(req.params.id);
+    res.json(updated);
 });
 
 // Delete a notification
 router.delete('/notifications/:id', (req, res) => {
-  const stmt = db.prepare('DELETE FROM notification WHERE id = ?');
-  const result = stmt.run(req.params.id);
-  if (result.changes === 0) return res.status(404).json({ error: 'Not found' });
+    const stmt = db.prepare('DELETE FROM notification WHERE id = ?');
+    const result = stmt.run(req.params.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Not found' });
 
-  res.status(204).send();
+    res.status(204).send();
 });
 
 //Paystack Reference checker
 router.get('/verify/:reference',async (req, res) => {
-  const reference = req.params.reference
+    const reference = req.params.reference
 
-  try {
-    const response = await axios.get(
-      `https://api.paystack.co/transaction/verify/${reference}`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`
+    try {
+        const response = await axios.get(
+            `https://api.paystack.co/transaction/verify/${reference}`,
+            {
+                headers: {
+                    Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`
+                }
+            }
+        )
+
+        // Check if payment was successful
+        if (response.data.data.status === 'success') {
+            return res.status(200).json({ status: 'success', data: response.data.data })
+        } else {
+            return res.status(404).json({ status: 'failed', data: response.data.data })
         }
-      }
-    )
-
-    // Check if payment was successful
-    if (response.data.data.status === 'success') {
-      return res.status(200).json({ status: 'success', data: response.data.data })
-    } else {
-      return res.status(404).json({ status: 'failed', data: response.data.data })
+    } catch (error) {
+        console.error('Verification error:', error.message)
+        return res.status(500).json({ status: 'error', message: 'Verification failed' })
     }
-  } catch (error) {
-    console.error('Verification error:', error.message)
-    return res.status(500).json({ status: 'error', message: 'Verification failed' })
-  }
 })
 
 module.exports = router;

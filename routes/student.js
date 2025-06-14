@@ -69,99 +69,110 @@ router.put('/me', async (req, res) => {
 
 //user metrics
 router.get('/metrics', (req, res) => {
-    const stmt = db.prepare('SELECT c.title FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE student_id = ?');
-    const student = stmt.get(req.user.id);
-    if (!student) return res.status(404).json({ error: 'Student not found' });
-    res.json(student);
+    //fetch enrolled course
+    const enrolled = db.prepare('SELECT c.title FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE student_id = ?').get(req.user.id);
+
+    //fetch user average score based on evaluation
+    const evaluation  = db.prepare(`
+      SELECT AVG(score) AS average_score, count(*) as total_evaluation
+      FROM evaluations
+      WHERE student_id = ?
+    `)
+
+    let metric = evaluation.get(req.user.id)
+    metric.course = enrolled.title
+
+    if (!metric) return res.status(404).json({ error: 'Student not found' });
+    res.json(metric);
 });
 
 // --- ENROLLMENTS ---
 router.post('/enrollment', (req, res) => {
-  const { courseId } = req.body;
-  if (!courseId) return res.status(400).json({ error: 'courseId is required' });
+    const { courseId } = req.body;
+    if (!courseId) return res.status(400).json({ error: 'courseId is required' });
 
     const user = db.prepare(`SELECT p.fullname as fullname, u.email as email FROM student_profiles p JOIN users u ON u.id = p.id WHERE u.id = ?`).get(req.user.id)
 
-  const html = getTemplate('enroll-welcome')
+    const html = getTemplate('enroll-welcome')
 
-  if (req.user.course_id) {
-    return res.status(400).json({ error: 'Already enrolled in a course' });
-  }
+    if (req.user.course_id) {
+        return res.status(400).json({ error: 'Already enrolled in a course' });
+    }
 
-  db.prepare(`INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)`)
-    .run(req.user.id, courseId);
+    db.prepare(`INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)`)
+        .run(req.user.id, courseId);
 
-  req.mailer.sendMail({
-    from: `"MerilLearn Course Enrollment Successful" <${process.env.SMTP_USER}>`,
-    to: user.email,
-    subject: 'Congratulations on Enrolling, We are pleased to have you...',
-    html
-  }).catch(err => {
-    console.error(err);
-  });
+    req.mailer.sendMail({
+        from: `"MerilLearn Course Enrollment Successful" <${process.env.SMTP_USER}>`,
+        to: user.email,
+        subject: 'Congratulations on Enrolling, We are pleased to have you...',
+        html
+    }).catch(err => {
+        console.error(err);
+    });
 
-  res.json({ message: 'Enrollment successful'});
+    res.json({ message: 'Enrollment successful'});
 });
 
 router.delete('/enrollment', (req, res) => {
-  try {
+    try {
 
-    db.prepare('DELETE FROM enrollments WHERE student_id = ?').run(req.user.id);
+        db.prepare('DELETE FROM enrollments WHERE student_id = ?').run(req.user.id);
 
-    res.json({ message: 'Enrollment deleted successfully' });
-  } catch (err) {
-    console.error('Error deleting enrollment:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.json({ message: 'Enrollment deleted successfully' });
+    } catch (err) {
+        console.error('Error deleting enrollment:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 router.use(checkEnrollment);
 
 router.get('/course', (req, res) => {
-  try {
-    // Get modules for the course
-    const modules = db.prepare(`
+    try {
+        // Get modules for the course
+        const modules = db.prepare(`
       SELECT id, title, active
       FROM modules
       WHERE course_id = ?
     `).all(req.user.course_id);
 
-    // Get topics for each module
-    const topicStmt = db.prepare(`
+        // Get topics for each module
+        const topicStmt = db.prepare(`
       SELECT id, module_id, title, content
       FROM topics
       WHERE module_id = ?
     `);
 
-    const modulesWithTopics = modules.map(mod => ({
-      ...mod,
-      topics: topicStmt.all(mod.id)
-    }));
+        const modulesWithTopics = modules.map(mod => ({
+            ...mod,
+            topics: topicStmt.all(mod.id)
+        }));
 
-    res.json({
-      course: {
-        id: req.user.course_id,
-        modules: modulesWithTopics
-      }
-    });
+        res.json({
+            course: {
+                id: req.user.course_id,
+                modules: modulesWithTopics
+            }
+        });
 
-  } catch (err) {
-    console.error('Error fetching enrolled course:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    } catch (err) {
+        console.error('Error fetching enrolled course:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 //fetch topic based on params
 router.get('/topic', (req, res) => {
-  const topicId = req.query.topicId;
+    const topicId = req.query.topicId;
 
-  if (!topicId) {
-    return res.status(400).json({ error: 'Missing topicId in query.' });
-  }
+    if (!topicId) {
+        return res.status(400).json({ error: 'Missing topicId in query.' });
+    }
 
-  try {
-    // Fetch topic and its module details
-    const topic = db.prepare(`
+    try {
+        // Fetch topic and its module details
+        const topic = db.prepare(`
       SELECT
         t.id,
         t.title,
@@ -174,87 +185,98 @@ router.get('/topic', (req, res) => {
       WHERE t.id = ?
     `).get(topicId);
 
-    if (!topic) {
-      return res.status(404).json({ error: 'Topic not found' });
+        if (!topic) {
+            return res.status(404).json({ error: 'Topic not found' });
+        }
+
+        // Validate that the topic belongs to the user's course
+        if (topic.course_id !== req.user.course_id) {
+            return res.status(403).json({ error: 'Access denied to this topic.' });
+        }
+
+        res.json({ topic });
+
+    } catch (err) {
+        console.error('Error fetching topic:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    // Validate that the topic belongs to the user's course
-    if (topic.course_id !== req.user.course_id) {
-      return res.status(403).json({ error: 'Access denied to this topic.' });
-    }
-
-    res.json({ topic });
-
-  } catch (err) {
-    console.error('Error fetching topic:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 
 //fetch project based on params
 router.get('/project', (req, res) => {
-  const projectId= req.query.projectId;
+    const projectId= req.query.projectId;
 
-  if (!projectId) {
-    return res.status(400).json({ error: 'Missing projectId in query.' });
-  }
+    if (!projectId) {
+        return res.status(400).json({ error: 'Missing projectId in query.' });
+    }
 
-  try {
-    // Fetch topic and its module details
-    const project = db.prepare(`
+    try {
+        // Fetch topic and its module details
+        const project = db.prepare(`
       SELECT p.id, p.title, p.instructions, p.rubric, m.id as module_id
       FROM projects p JOIN modules m ON m.id=p.module_id where p.id = ?
     `).get(projectId);
 
-    if (!project) {
-      return res.status(404).json({ error: 'project not found' });
+        if (!project) {
+            return res.status(404).json({ error: 'project not found' });
+        }
+
+        //join project evaluation if it exists in database
+        const stmt = db.prepare(`SELECT * FROM evaluations WHERE project_id = ? AND student_id = ?`)
+        let rows = stmt.get(projectId, req.user.id)
+
+        if(rows){
+            rows.feedback = JSON.parse(rows.feedback) // Convert from string to array
+        }
+
+        project.evaluation = rows
+
+
+        res.json({ project });
+
+    } catch (err) {
+        console.error('Error fetching project :', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    res.json({ project });
-
-  } catch (err) {
-    console.error('Error fetching project :', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 router.put('/topic/complete', (req, res) => {
-  const { topicId } = req.body;
+    const { topicId } = req.body;
 
-  if (!topicId) {
-    return res.status(400).json({ error: 'topicId is Required...' });
-  }
+    if (!topicId) {
+        return res.status(400).json({ error: 'topicId is Required...' });
+    }
 
-  try {
-    // Fetch topic and its module details
-    const topic = db.prepare(`
+    try {
+        // Fetch topic and its module details
+        const topic = db.prepare(`
       UPDATE
         topics
       SET completed=1
       WHERE id = ?
     `).run(topicId);
 
-    if (!topic) {
-      return res.status(404).json({ error: 'Topic not found' });
+        if (!topic) {
+            return res.status(404).json({ error: 'Topic not found' });
+        }
+
+        // Validate that the topic belongs to the user's course
+        if (topic.course_id !== req.user.course_id) {
+            return res.status(403).json({ error: 'Access denied to this topic.' });
+        }
+
+        res.json({ topic });
+
+    } catch (err) {
+        console.error('Error fetching topic:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    // Validate that the topic belongs to the user's course
-    if (topic.course_id !== req.user.course_id) {
-      return res.status(403).json({ error: 'Access denied to this topic.' });
-    }
-
-    res.json({ topic });
-
-  } catch (err) {
-    console.error('Error fetching topic:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 router.get('/project-scores', (req, res) => {
-  try {
-    const scores = db.prepare(`
+    try {
+        const scores = db.prepare(`
       SELECT
         ps.score,
         ps.feedback
@@ -262,51 +284,51 @@ router.get('/project-scores', (req, res) => {
       WHERE ps.student_id = ?
     `).all(req.user.id);
 
-    if (scores.length === 0) {
-      return res.status(404).json({ message: 'No project scores found for this student.' });
-    }
+        if (scores.length === 0) {
+            return res.status(404).json({ message: 'No project scores found for this student.' });
+        }
 
-    res.json({ scores });
-  } catch (err) {
-    console.error('Error fetching project scores:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.json({ scores });
+    } catch (err) {
+        console.error('Error fetching project scores:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 router.post('/project-scores', (req, res) => {
-  const { project_id, score, feedback } = req.body;
+    const { project_id, score, feedback } = req.body;
 
-  if (!project_id || score == null) {
-    return res.status(400).json({ error: 'project_id and score are required' });
-  }
+    if (!project_id || score == null) {
+        return res.status(400).json({ error: 'project_id and score are required' });
+    }
 
-  try {
-    // Check if record already exists (avoid duplicates)
-    const existing = db.prepare(`
+    try {
+        // Check if record already exists (avoid duplicates)
+        const existing = db.prepare(`
       SELECT * FROM project_scores
       WHERE student_id = ? AND project_id = ?
     `).get(req.user.id, project_id);
 
-    if (existing) {
-      return res.status(409).json({ error: 'Project score for this project already exists' });
-    }
+        if (existing) {
+            return res.status(409).json({ error: 'Project score for this project already exists' });
+        }
 
-    db.prepare(`
+        db.prepare(`
       INSERT INTO project_scores (id, student_id, project_id, score, feedback)
       VALUES (?, ?, ?, ?)
     `).run(req.user.id, project_id, score, feedback || null);
 
-    res.status(201).json({ message: 'Project score created successfully'});
-  } catch (err) {
-    console.error('Error creating project score:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.status(201).json({ message: 'Project score created successfully'});
+    } catch (err) {
+        console.error('Error creating project score:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 router.get('/projects', (req, res) => {
-  try {
-    // Fetch projects related to the enrolled course
-    const projects = db.prepare(`
+    try {
+        // Fetch projects related to the enrolled course
+        const projects = db.prepare(`
       SELECT
         m.title,
         p.title,
@@ -314,11 +336,11 @@ router.get('/projects', (req, res) => {
       FROM modules m JOIN projects p ON p.id = m.project_id WHERE course_id = ?
     `).all(req.user.course_id);
 
-    res.json({ projects });
-  } catch (err) {
-    console.error('Error fetching projects for student:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.json({ projects });
+    } catch (err) {
+        console.error('Error fetching projects for student:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 module.exports = router;

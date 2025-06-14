@@ -1,5 +1,7 @@
+require('dotenv').config();
 const express = require('express');
 const router = express.Router()
+const db = require('../db')
 const axios = require('axios')
 
 function parseAIResponse(aiResponse) {
@@ -19,7 +21,7 @@ function parseAIResponse(aiResponse) {
           Array.isArray(parsed.project_strengths) &&
           Array.isArray(parsed.project_weakness) &&
           Array.isArray(parsed.alignment) &&
-          Array.isArray(parsed.AOI) &&
+          Array.isArray(parsed.aoi) &&
           Array.isArray(parsed.final_assessment)
       ) {
           return parsed;
@@ -35,12 +37,46 @@ function parseAIResponse(aiResponse) {
   }
 }
 
-router.post('/', async (req, res) => {
-    const { instructions, rubric, studentCode } = req.body;
+async function readGoogleDriveFileText(driveUrl) {
+  try {
+    // Extract file ID from the shareable link
+    const fileIdMatch = driveUrl.match(/[-\w]{25,}/);
+    if (!fileIdMatch) throw new Error("Invalid Google Drive link");
 
-    if (!instructions || !rubric || !studentCode) {
+    const fileId = fileIdMatch[0];
+
+    // Construct the download URL
+    const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+    const response = await fetch(downloadUrl);
+    if (!response.ok) throw new Error("Failed to fetch file");
+
+    const text = await response.text();
+    return text;
+
+  } catch (error) {
+    console.error("Error reading Google Drive file:", error);
+    return null;
+  }
+}
+
+router.post('/', async (req, res) => {
+    const { projectId, file_link, file_type } = req.body;
+
+    const studentCode = await readGoogleDriveFileText(file_link)
+
+    if (!projectId || !file_link || !file_type) {
         return res.status(400).json({ error: 'Missing required fields' });
     }
+
+    const project = db.prepare(`
+      SELECT p.id, p.title as title, p.instructions as instructions, p.rubric as rubric
+      FROM projects p WHERE p.id = ?
+    `).get(projectId);
+
+    //fetched instructions and rubric from database
+    const instructions = project.instructions
+    const rubric = project.rubric
 
     const systemPrompt = `
 You are an expert programming instructor grading a student project.
@@ -51,7 +87,7 @@ You must return a strict JSON response containing only two fields:
 2. "project_strengths": JSON array of the project strenghts
 3. "project_weakness": JSON array of weaknesses
 3. "alignment": JSON array of what the user did that aligns with the instructions
-4. "AOI": JSON array of areas of which the student should improve on
+4. "aoi": JSON array of areas of which the student should improve on
 5. "final_assessment": JSON array of the final feedback
 
 Do NOT add anything else. Follow these rules strictly.
@@ -66,16 +102,19 @@ ${rubric}
 
     const userPrompt = `
 Student's Submission:
-\`\`\`javascript
+\`\`\`${file_type}
 ${studentCode}
 \`\`\`
 `;
+
+    // This is the ai model used for grading
+    const grader = 'deepseek/deepseek-r1-0528:free'
 
     try {
         const response = await axios.post(
             'https://openrouter.ai/api/v1/chat/completions',
             {
-                model: 'deepseek/deepseek-r1-0528-qwen3-8b:free', // or another valid model from https://openrouter.ai/models
+                model: grader, // or another valid model from https://openrouter.ai/models
                 messages: [
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userPrompt }
@@ -92,8 +131,26 @@ ${studentCode}
 
         const rawMessage = response.data.choices[0].message.content;
 
-        const airesponse = parseAIResponse(rawMessage)
-        res.json(airesponse)
+        const feedback = parseAIResponse(rawMessage)
+
+        const score = feedback .score
+        console.log(score)
+
+        // Save to SQLite
+        const stmt = db.prepare(`
+      INSERT INTO evaluations (student_id, project_id, file_link, score, feedback, grader)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `)
+        stmt.run(
+            req.user.id,
+            projectId,
+            file_link,
+            score,
+            JSON.stringify(feedback), // Store array as text
+            grader
+        )
+
+        res.json(feedback)
     } catch (error) {
         console.error('OpenRouter API error:', error.response?.data || error.message);
         res.status(500).json({ error: 'Error grading submission' });
