@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const db = require('../db');
+const pool = require('../db');
 
 const router = express.Router();
 
@@ -10,54 +10,63 @@ const { getTemplate } = require('../utils/emailTemplates');
 const checkEnrollment = require('../middleware/enroll');
 
 //user profile
-router.get('/me', (req, res) => {
-    const stmt = db.prepare('SELECT u.id, s.fullname, u.email, u.created_at FROM users u JOIN student_profiles s ON s.id=u.id WHERE u.id = ?');
-    const student = stmt.get(req.user.id);
-    console.log(student)
-    if (!student) return res.status(404).json({ error: 'Student not found' });
-    res.json(student);
+router.get('/me', async (req, res) => {
+  try {
+        const sql = `
+          SELECT u.id, s.fullname, u.email, u.created_at
+          FROM users u
+          JOIN student_profiles s ON s.id = u.id
+          WHERE u.id = ?
+        `;
+
+        const [rows] = await pool.query(sql, [req.user.id]);
+        const student = rows[0];
+
+        if (!student) {
+          return res.status(404).json({ error: 'Student not found' });
+        }
+
+        res.json(student);
+  } catch (err) {
+    console.error('Error fetching student:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 router.put('/me', async (req, res) => {
   const { fullname, password } = req.body;
 
-  // At least one field should be present
   if (!fullname && !password) {
-    return res.status(400).json({ error: 'At least one field (name, email, or password) must be provided' });
+    return res.status(400).json({ error: 'At least one field (name or password) must be provided' });
   }
 
   try {
-    // Build update query dynamically
-    const fields = [];
     const values = [];
+    let updateProfileSql = '';
+    let profileParams = [];
 
-    if (fullname) {
-      fields.push('fullname = ?');
-      values.push(fullname);
+    // Update password if provided
+    if (password) {
+      const hashed = await bcrypt.hash(password, 10);
+      const updatePasswordSql = 'UPDATE users SET password = ? WHERE id = ?';
+      await pool.query(updatePasswordSql, [hashed, req.user.id]);
     }
 
-    const hashed = await bcrypt.hash(password, 10);
+    // Update fullname if provided
+    if (fullname) {
+      updateProfileSql = 'UPDATE student_profiles SET fullname = ? WHERE id = ?';
+      profileParams = [fullname, req.user.id];
 
-    values.push(req.user.id); // for WHERE clause
+      const [result] = await pool.query(updateProfileSql, profileParams);
 
-      if(password){
-        db.prepare(`
-          UPDATE users
-          SET password = ?
-          WHERE id = ?
-        `).run(hashed, req.user.id);
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Student not found or no changes made' });
       }
+    }
 
-    const stmt = db.prepare(`
-      UPDATE student_profiles
-      SET ${fields.join(', ')}
-      WHERE id = ?
-    `);
-
-    const result = stmt.run(...values);
-
-    if (result.changes === 0) {
-      return res.status(404).json({ error: 'Student not found or no changes made' });
+    // If only password was updated, still send success
+    if (!fullname) {
+      return res.json({ message: 'Profile updated successfully' });
     }
 
     res.json({ message: 'Profile updated successfully' });
@@ -68,279 +77,356 @@ router.put('/me', async (req, res) => {
 });
 
 //user metrics
-router.get('/metrics', (req, res) => {
-    //fetch enrolled course
-    const enrolled = db.prepare('SELECT c.title FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE student_id = ?').get(req.user.id);
+router.get('/metrics', async (req, res) => {
+  try {
+    // Fetch enrolled course (assuming only one course, else use query)
+    const enrolledSql = `
+      SELECT c.title
+      FROM enrollments e
+      JOIN courses c ON c.id = e.course_id
+      WHERE e.student_id = ?
+      LIMIT 1
+    `;
+    const [enrolledRows] = await pool.query(enrolledSql, [req.user.id]);
+    const enrolled = enrolledRows[0];
 
-    //fetch user average score based on evaluation
-    const evaluation  = db.prepare(`
-      SELECT AVG(score) AS average_score, count(*) as total_evaluation
+    // Fetch user average score based on evaluation
+    const evaluationSql = `
+      SELECT AVG(score) AS average_score, COUNT(*) AS total_evaluation
       FROM evaluations
       WHERE student_id = ?
-    `)
+    `;
+    const [evaluationRows] = await pool.query(evaluationSql, [req.user.id]);
+    const metric = evaluationRows[0];
 
-    let metric = evaluation.get(req.user.id)
-    metric.course = enrolled.title
+    if (!metric) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
 
-    if (!metric) return res.status(404).json({ error: 'Student not found' });
+    metric.course = enrolled ? enrolled.title : null;
+
     res.json(metric);
+  } catch (err) {
+    console.error('Error fetching metrics:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // --- ENROLLMENTS ---
-router.post('/enrollment', (req, res) => {
+router.post('/enrollment', async (req, res) => {
+  try {
     const { courseId } = req.body;
     if (!courseId) return res.status(400).json({ error: 'courseId is required' });
 
-    const user = db.prepare(`SELECT p.fullname as fullname, u.email as email FROM student_profiles p JOIN users u ON u.id = p.id WHERE u.id = ?`).get(req.user.id)
+    // Fetch user info
+    const userSql = `
+      SELECT p.fullname AS fullname, u.email AS email
+      FROM student_profiles p
+      JOIN users u ON u.id = p.id
+      WHERE u.id = ?
+    `;
+    const [userRows] = await pool.query(userSql, [req.user.id]);
+    const user = userRows[0];
 
-    const html = getTemplate('enroll-welcome')
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-    if (req.user.course_id) {
-        return res.status(400).json({ error: 'Already enrolled in a course' });
+    // Check if already enrolled in a course
+    const enrollmentCheckSql = 'SELECT course_id FROM enrollments WHERE student_id = ? LIMIT 1';
+    const [enrollments] = await pool.query(enrollmentCheckSql, [req.user.id]);
+    if (enrollments.length > 0) {
+      return res.status(400).json({ error: 'Already enrolled in a course' });
     }
 
-    db.prepare(`INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)`)
-        .run(req.user.id, courseId);
+    // Insert new enrollment
+    const insertSql = 'INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)';
+    await pool.query(insertSql, [req.user.id, courseId]);
 
+    // Prepare and send email
+    const html = getTemplate('enroll-welcome');
     req.mailer.sendMail({
-        from: `"MerilLearn Course Enrollment Successful" <${process.env.SMTP_USER}>`,
-        to: user.email,
-        subject: 'Congratulations on Enrolling, We are pleased to have you...',
-        html
+      from: `"MerilLearn Course Enrollment Successful" <${process.env.SMTP_USER}>`,
+      to: user.email,
+      subject: 'Congratulations on Enrolling, We are pleased to have you...',
+      html,
     }).catch(err => {
-        console.error(err);
+      console.error('Mailer error:', err);
     });
 
-    res.json({ message: 'Enrollment successful'});
+    res.json({ message: 'Enrollment successful' });
+  } catch (err) {
+    console.error('Error in enrollment POST:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-router.delete('/enrollment', (req, res) => {
-    try {
+router.delete('/enrollment', async (req, res) => {
+  try {
+    const deleteSql = 'DELETE FROM enrollments WHERE student_id = ?';
+    const [result] = await pool.query(deleteSql, [req.user.id]);
 
-        db.prepare('DELETE FROM enrollments WHERE student_id = ?').run(req.user.id);
-
-        res.json({ message: 'Enrollment deleted successfully' });
-    } catch (err) {
-        console.error('Error deleting enrollment:', err);
-        res.status(500).json({ error: 'Internal server error' });
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Enrollment not found' });
     }
+
+    res.json({ message: 'Enrollment deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting enrollment:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 router.use(checkEnrollment);
 
-router.get('/course', (req, res) => {
-    try {
-        // Get modules for the course
-        const modules = db.prepare(`
+router.get('/course', async (req, res) => {
+  try {
+    // Get modules for the course
+    const modulesSql = `
       SELECT id, title, active
       FROM modules
       WHERE course_id = ?
-    `).all(req.user.course_id);
+    `;
+    const [modules] = await pool.query(modulesSql, [req.user.course_id]);
+      console.log(req.user.course_id)
 
-        // Get topics for each module
-        const topicStmt = db.prepare(`
+    // For each module, get topics
+    const topicSql = `
       SELECT id, module_id, title, content
       FROM topics
       WHERE module_id = ?
-    `);
+    `;
 
-        const modulesWithTopics = modules.map(mod => ({
-            ...mod,
-            topics: topicStmt.all(mod.id)
-        }));
+    // Use Promise.all to parallelize topic queries
+    const modulesWithTopics = await Promise.all(
+      modules.map(async (mod) => {
+        const [topics] = await pool.query(topicSql, [mod.id]);
+        return { ...mod, topics };
+      })
+    );
 
-        res.json({
-            course: {
-                id: req.user.course_id,
-                modules: modulesWithTopics
-            }
-        });
+      console.log(req.user.course_id)
 
-    } catch (err) {
-        console.error('Error fetching enrolled course:', err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
+    res.json({
+      course: {
+        id: req.user.course_id,
+        modules: modulesWithTopics,
+      },
+    });
+  } catch (err) {
+    console.error('Error fetching enrolled course:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 //fetch topic based on params
-router.get('/topic', (req, res) => {
-    const topicId = req.query.topicId;
+router.get('/topic', async (req, res) => {
+  const topicId = req.query.topicId;
 
-    if (!topicId) {
-        return res.status(400).json({ error: 'Missing topicId in query.' });
-    }
+  if (!topicId) {
+    return res.status(400).json({ error: 'Missing topicId in query.' });
+  }
 
-    try {
-        // Fetch topic and its module details
-        const topic = db.prepare(`
+  try {
+    const sql = `
       SELECT
         t.id,
         t.title,
         t.content,
-        t.recommended_video as video,
+        t.recommended_video AS video,
         m.course_id,
-        m.title as module_title
+        m.title AS module_title
       FROM topics t
       JOIN modules m ON t.module_id = m.id
       WHERE t.id = ?
-    `).get(topicId);
+    `;
+    const [rows] = await pool.query(sql, [topicId]);
+    const topic = rows[0];
 
-        if (!topic) {
-            return res.status(404).json({ error: 'Topic not found' });
-        }
-
-        // Validate that the topic belongs to the user's course
-        if (topic.course_id !== req.user.course_id) {
-            return res.status(403).json({ error: 'Access denied to this topic.' });
-        }
-
-        res.json({ topic });
-
-    } catch (err) {
-        console.error('Error fetching topic:', err);
-        res.status(500).json({ error: 'Internal server error' });
+    if (!topic) {
+      return res.status(404).json({ error: 'Topic not found' });
     }
-});
 
+    if (topic.course_id !== req.user.course_id) {
+      return res.status(403).json({ error: 'Access denied to this topic.' });
+    }
+
+    res.json({ topic });
+  } catch (err) {
+    console.error('Error fetching topic:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 //fetch project based on params
-router.get('/project', (req, res) => {
-    const projectId= req.query.projectId;
+router.get('/project', async (req, res) => {
+  const projectId = req.query.projectId;
 
-    if (!projectId) {
-        return res.status(400).json({ error: 'Missing projectId in query.' });
+  if (!projectId) {
+    return res.status(400).json({ error: 'Missing projectId in query.' });
+  }
+
+  try {
+    // Fetch project with module details
+    const projectSql = `
+      SELECT p.id, p.title, p.instructions, p.rubric, m.id AS module_id
+      FROM projects p
+      JOIN modules m ON m.id = p.module_id
+      WHERE p.id = ?
+    `;
+    const [projectRows] = await pool.query(projectSql, [projectId]);
+    const project = projectRows[0];
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
     }
 
-    try {
-        // Fetch topic and its module details
-        const project = db.prepare(`
-      SELECT p.id, p.title, p.instructions, p.rubric, m.id as module_id
-      FROM projects p JOIN modules m ON m.id=p.module_id where p.id = ?
-    `).get(projectId);
+    // Fetch evaluation if exists
+    const evalSql = `
+      SELECT * FROM evaluations
+      WHERE project_id = ? AND student_id = ?
+    `;
+    const [evalRows] = await pool.query(evalSql, [projectId, req.user.id]);
+    const evaluation = evalRows[0];
 
-        if (!project) {
-            return res.status(404).json({ error: 'project not found' });
-        }
-
-        //join project evaluation if it exists in database
-        const stmt = db.prepare(`SELECT * FROM evaluations WHERE project_id = ? AND student_id = ?`)
-        let rows = stmt.get(projectId, req.user.id)
-
-        if(rows){
-            rows.feedback = JSON.parse(rows.feedback) // Convert from string to array
-        }
-
-        project.evaluation = rows
-
-
-        res.json({ project });
-
-    } catch (err) {
-        console.error('Error fetching project :', err);
-        res.status(500).json({ error: 'Internal server error' });
+    if (evaluation && evaluation.feedback) {
+      try {
+        evaluation.feedback = JSON.parse(evaluation.feedback);
+      } catch (e) {
+        console.warn('Failed to parse evaluation feedback JSON:', e);
+        evaluation.feedback = null;
+      }
     }
+
+    project.evaluation = evaluation || null;
+
+    res.json({ project });
+  } catch (err) {
+    console.error('Error fetching project:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-router.put('/topic/complete', (req, res) => {
-    const { topicId } = req.body;
+//mark topic as complete
+router.put('/topic/complete', async (req, res) => {
+  const { topicId } = req.body;
 
-    if (!topicId) {
-        return res.status(400).json({ error: 'topicId is Required...' });
+  if (!topicId) {
+    return res.status(400).json({ error: 'topicId is Required...' });
+  }
+
+  try {
+    // First, verify topic belongs to user's course
+    const checkSql = `
+      SELECT t.course_id
+      FROM topics t
+      WHERE t.id = ?
+    `;
+    const [checkRows] = await pool.query(checkSql, [topicId]);
+    const topic = checkRows[0];
+
+    if (!topic) {
+      return res.status(404).json({ error: 'Topic not found' });
     }
 
-    try {
-        // Fetch topic and its module details
-        const topic = db.prepare(`
-      UPDATE
-        topics
-      SET completed=1
+    if (topic.course_id !== req.user.course_id) {
+      return res.status(403).json({ error: 'Access denied to this topic.' });
+    }
+
+    // Update topic as completed
+    const updateSql = `
+      UPDATE topics
+      SET completed = 1
       WHERE id = ?
-    `).run(topicId);
+    `;
+    const [updateResult] = await pool.query(updateSql, [topicId]);
 
-        if (!topic) {
-            return res.status(404).json({ error: 'Topic not found' });
-        }
-
-        // Validate that the topic belongs to the user's course
-        if (topic.course_id !== req.user.course_id) {
-            return res.status(403).json({ error: 'Access denied to this topic.' });
-        }
-
-        res.json({ topic });
-
-    } catch (err) {
-        console.error('Error fetching topic:', err);
-        res.status(500).json({ error: 'Internal server error' });
+    if (updateResult.affectedRows === 0) {
+      return res.status(404).json({ error: 'Topic update failed' });
     }
+
+    res.json({ message: 'Topic marked as complete' });
+  } catch (err) {
+    console.error('Error updating topic completion:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-router.get('/project-scores', (req, res) => {
-    try {
-        const scores = db.prepare(`
+//project-scores
+router.get('/project-scores', async (req, res) => {
+  try {
+    const sql = `
       SELECT
         ps.score,
         ps.feedback
       FROM project_scores ps
       WHERE ps.student_id = ?
-    `).all(req.user.id);
+    `;
+    const [scores] = await pool.query(sql, [req.user.id]);
 
-        if (scores.length === 0) {
-            return res.status(404).json({ message: 'No project scores found for this student.' });
-        }
-
-        res.json({ scores });
-    } catch (err) {
-        console.error('Error fetching project scores:', err);
-        res.status(500).json({ error: 'Internal server error' });
+    if (scores.length === 0) {
+      return res.status(404).json({ message: 'No project scores found for this student.' });
     }
+
+    res.json({ scores });
+  } catch (err) {
+    console.error('Error fetching project scores:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-router.post('/project-scores', (req, res) => {
-    const { project_id, score, feedback } = req.body;
+router.post('/project-scores', async (req, res) => {
+  const { project_id, score, feedback } = req.body;
 
-    if (!project_id || score == null) {
-        return res.status(400).json({ error: 'project_id and score are required' });
-    }
+  if (!project_id || score == null) {
+    return res.status(400).json({ error: 'project_id and score are required' });
+  }
 
-    try {
-        // Check if record already exists (avoid duplicates)
-        const existing = db.prepare(`
+  try {
+    // Check if record already exists (avoid duplicates)
+    const checkSql = `
       SELECT * FROM project_scores
       WHERE student_id = ? AND project_id = ?
-    `).get(req.user.id, project_id);
+    `;
+    const [existingRows] = await pool.query(checkSql, [req.user.id, project_id]);
 
-        if (existing) {
-            return res.status(409).json({ error: 'Project score for this project already exists' });
-        }
-
-        db.prepare(`
-      INSERT INTO project_scores (id, student_id, project_id, score, feedback)
-      VALUES (?, ?, ?, ?)
-    `).run(req.user.id, project_id, score, feedback || null);
-
-        res.status(201).json({ message: 'Project score created successfully'});
-    } catch (err) {
-        console.error('Error creating project score:', err);
-        res.status(500).json({ error: 'Internal server error' });
+    if (existingRows.length > 0) {
+      return res.status(409).json({ error: 'Project score for this project already exists' });
     }
+
+    // Insert new project score
+    // Generate a new id if your id column requires a UUID or auto-increment? Adjust accordingly
+    const id = randomUUID();
+
+    const insertSql = `
+      INSERT INTO project_scores (id, student_id, project_id, score, feedback)
+      VALUES (?, ?, ?, ?, ?)
+    `;
+    await pool.query(insertSql, [id, req.user.id, project_id, score, feedback || null]);
+
+    res.status(201).json({ message: 'Project score created successfully' });
+  } catch (err) {
+    console.error('Error creating project score:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-router.get('/projects', (req, res) => {
-    try {
-        // Fetch projects related to the enrolled course
-        const projects = db.prepare(`
+router.get('/projects', async (req, res) => {
+  try {
+    const sql = `
       SELECT
-        m.title,
-        p.title,
+        m.title AS module_title,
+        p.title AS project_title,
         p.instructions
-      FROM modules m JOIN projects p ON p.id = m.project_id WHERE course_id = ?
-    `).all(req.user.course_id);
+      FROM modules m
+      JOIN projects p ON p.id = m.project_id
+      WHERE m.course_id = ?
+    `;
+    const [projects] = await pool.query(sql, [req.user.course_id]);
 
-        res.json({ projects });
-    } catch (err) {
-        console.error('Error fetching projects for student:', err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
+    res.json({ projects });
+  } catch (err) {
+    console.error('Error fetching projects for student:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 module.exports = router;

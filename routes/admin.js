@@ -1,7 +1,7 @@
 // routes/auth.js
 require('dotenv').config()
 const express = require('express');
-const db = require('../db');
+const pool = require('../db')
 const axios = require('axios');
 const fs = require('fs')
 const path = require('path')
@@ -15,42 +15,56 @@ const { useUploader } = require('../middleware/upload.js');
 const router = express.Router();
 
 // Create a topic
-router.post('/topics', (req, res) => {
-    const { moduleId, title, content, recommended_video } = req.body;
-    if (!moduleId || !title || !content ) {
-        return res.status(400).json({ error: 'moduleId, title, and content are required' });
-    }
+router.post('/topics', async (req, res) => {
+    const { title, moduleId, recommended_video, content } = req.body;
 
-    const query = db.prepare(`
-    INSERT INTO topics (module_id, title, content, recommended_video)
-    VALUES (?, ?, ?, ?)
-  `).run(moduleId, title, content, recommended_video);
-
-    res.status(201).json({ message: 'Topic created', topicId: query.lastInsertRowid });
-});
-
-//Delete a Topic
-router.delete('/topics/:id', (req, res) => {
-    const { id } = req.params;
-    if (!id) return res.status(400).json({ error: 'id is required' });
-
-    db.prepare('DELETE FROM topics WHERE id=?')
-        .run(id);
-
-    res.status(201).json({ message: 'Topic Deleted Successfully', courseId: id });
-});
-
-//Edit a Topic
-router.put('/topics/:id', (req, res) => {
-    const { id } = req.params;
-    const { title, moduleId, content, recommended_video } = req.body;
-
-    if (!title, !moduleId, !content) {
-        return res.status(400).json({ error: 'module_id, instructions and title are required' });
+    if (!title || !moduleId || !content || !recommended_video) {
+        return res.status(400).json({ error: 'module_id, recommended_video, content and title are required' });
     }
 
     try {
-        // Build update query dynamically
+        const [result] = await pool.execute(
+            `INSERT INTO topics (title, recommended_video, content, module_id) VALUES (?, ?, ?, ?)`,
+            [title, recommended_video || null, content, moduleId]
+        );
+
+        res.status(201).json({ message: 'Topic created successfully', id: result.insertId });
+    } catch (err) {
+        console.error('Error creating project:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Delete a Topic (MySQL version)
+router.delete('/topics/:id', async (req, res) => {
+    const { id } = req.params;
+
+    if (!id) return res.status(400).json({ error: 'id is required' });
+
+    try {
+        const [result] = await pool.execute(`DELETE FROM topics WHERE id = ?`, [id]);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Topic not found' });
+        }
+
+        res.status(201).json({ message: 'Topic Deleted Successfully', courseId: id });
+    } catch (err) {
+        console.error('Error deleting topic:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+//Edit a Topic
+router.put('/topics/:id', async (req, res) => {
+    const { id } = req.params;
+    const { title, moduleId, content, recommended_video } = req.body;
+
+    if (!title || !moduleId || !content) {
+        return res.status(400).json({ error: 'module_id, content and title are required' });
+    }
+
+    try {
         const fields = [];
         const values = [];
 
@@ -76,15 +90,10 @@ router.put('/topics/:id', (req, res) => {
 
         values.push(id); // for WHERE clause
 
-        const stmt = db.prepare(`
-          UPDATE topics
-          SET ${fields.join(', ')}
-          WHERE id = ?
-        `);
+        const sql = `UPDATE topics SET ${fields.join(', ')} WHERE id = ?`;
+        const [result] = await pool.execute(sql, values);
 
-        const result = stmt.run(...values);
-
-        if (result.changes === 0) {
+        if (result.affectedRows === 0) {
             return res.status(404).json({ error: 'Topic not found or no changes made' });
         }
 
@@ -96,187 +105,208 @@ router.put('/topics/:id', (req, res) => {
 });
 
 // Create a course
-router.post('/courses', useUploader('/uploads/courses'), (req, res) => {
-
+router.post('/courses', useUploader('/uploads/courses'), async (req, res) => {
     const { title, price, description } = req.body;
+
     if (!title) return res.status(400).json({ error: 'title is required' });
 
-    const query = db.prepare('INSERT INTO courses (title, cover_img_url, description, price) VALUES (?, ?, ?, ?)')
-        .run(title, req.file.uploadUrl, description || null, price);
+    try {
+        const sql = 'INSERT INTO courses (title, cover_img_url, description, price) VALUES (?, ?, ?, ?)';
+        const [result] = await pool.execute(sql, [
+            title,
+            req.file.uploadUrl,
+            description || null,
+            price || null
+        ]);
 
-    res.status(201).json({ message: 'Course created', courseId: query.lastInsertRowid });
+        res.status(201).json({ message: 'Course created', courseId: result.insertId });
+    } catch (err) {
+        console.error('Error creating course:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 // Edit a course
-router.put('/courses/:id', useUploader('/uploads/courses'), (req, res) => {
-    const { id } = req.params;
-    const { title, price, description } = req.body;
+router.put('/courses/:id', useUploader('/uploads/courses'), async (req, res) => {
+  const { id } = req.params;
+  const { title, price, description } = req.body;
 
-    if (!title) return res.status(400).json({ error: 'title is required' });
+  if (!title) return res.status(400).json({ error: 'title is required' });
 
-        const rootDir = process.cwd()
+  try {
+    const [rows] = await pool.execute('SELECT cover_img_url FROM courses WHERE id = ?', [id]);
 
-        const courses = db.prepare(`
-        SELECT cover_img_url
-        FROM courses WHERE id = ?
-      `).get(id);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
 
+    const imagePath = path.join(process.cwd(), rows[0].cover_img_url);
+    await fs.unlinkSync(imagePath) // ignore if file not found
 
-    const imagePath = path.join(rootDir, courses.cover_img_url)
+    const [result] = await pool.execute(
+      'UPDATE courses SET title = ?, cover_img_url = ?, description = ?, price = ? WHERE id = ?',
+      [title, req.file.uploadUrl, description || null, price, id]
+    );
 
-    fs.unlink(imagePath, (err) => {
-        if(err){
-            return res.status(500).json({error: err})
-        }
-    })
-
-    const query = db.prepare('UPDATE courses SET title = ?, cover_img_url = ?, description = ?, price = ? where id = ?')
-        .run(title, req.file.uploadUrl, description || null, price, id);
-
-    res.status(201).json({ message: 'Course Edited Successfully', courseId: query.lastInsertRowid });
+    res.status(201).json({ message: 'Course Edited Successfully', courseId: id });
+  } catch (err) {
+    console.error('Error updating course:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-//Delete a course
-router.delete('/courses/:id', (req, res) => {
-    const { id } = req.params;
+// Delete a course
+router.delete('/courses/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: 'id is required' });
 
-    if (!id) return res.status(400).json({ error: 'id is required' });
+  try {
+    const [rows] = await pool.execute('SELECT cover_img_url FROM courses WHERE id = ?', [id]);
 
-    const rootDir = process.cwd()
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
 
-    const courses = db.prepare(`
-    SELECT cover_img_url
-    FROM courses WHERE id = ?
-  `).get(id);
+    const imagePath = path.join(process.cwd(), rows[0].cover_img_url);
+    fs.unlinkSync(imagePath)
 
-    const imagePath = path.join(rootDir, courses.cover_img_url)
+    await pool.execute('DELETE FROM courses WHERE id = ?', [id]);
 
-    //Delete cover image along with course so as to save space on server
-    fs.unlink(imagePath, (err) => {
-        if(err){
-            return res.status(500).json({message: 'Unable to delete cover image', error: err})
-        }
-
-        db.prepare('DELETE FROM courses WHERE id=?') .run(id);
-        res.status(201).json({ message: 'Course Deleted Successfully', courseId: id });
-    })
+    res.status(201).json({ message: 'Course Deleted Successfully', courseId: id });
+  } catch (err) {
+    console.error('Error deleting course:', err);
+    res.status(500).json({ message: 'Server error', error: err });
+  }
 });
 
 // Create a module
-router.post('/modules', (req, res) => {
-    const { courseId, title, active} = req.body;
-    if (!courseId || !title ) {
-        return res.status(400).json({ error: 'courseId, title, required' });
-    }
+router.post('/modules', async (req, res) => {
+  const { courseId, title, active } = req.body;
+  if (!courseId || !title) {
+    return res.status(400).json({ error: 'courseId and title are required' });
+  }
 
-    const query = db.prepare(` INSERT INTO modules (course_id, title, active )
-    VALUES (?, ?, ?)
-  `).run(courseId, title, active);
+  try {
+    const [result] = await pool.execute(
+      'INSERT INTO modules (course_id, title, active) VALUES (?, ?, ?)',
+      [courseId, title, active]
+    );
 
-    res.status(201).json({ message: 'Module created', moduleId: query.lastInsertRowid });
+    res.status(201).json({ message: 'Module created', moduleId: result.insertId });
+  } catch (err) {
+    console.error('Error creating module:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Delete a module
-router.delete('/modules/:id', (req, res) => {
-    const { id } = req.params;
-    if ( !id ) {
-        return res.status(400).json({ error: 'Invalid Parameter, missing Id ' });
-    }
+router.delete('/modules/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ error: 'Invalid Parameter, missing Id' });
+  }
 
-    db.prepare(`
-    DELETE FROM modules WHERE id=?
-  `).run(id);
-
+  try {
+    await pool.execute('DELETE FROM modules WHERE id = ?', [id]);
     res.status(201).json({ message: 'Module deleted', moduleId: id });
+  } catch (err) {
+    console.error('Error deleting module:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-//Edit Module
-router.put('/modules/:id', (req, res) => {
-    const { id } = req.params;
-    const { courseId, title, active } = req.body;
+// Edit a module
+router.put('/modules/:id', async (req, res) => {
+  const { id } = req.params;
+  const { courseId, title, active } = req.body;
 
-    // At least one field should be present
-    if (!courseId || !title ||!id ) {
-        return res.status(400).json({ error: 'id, courseId, title, is required' });
+  if (!id || !courseId || !title) {
+    return res.status(400).json({ error: 'id, courseId, title are required' });
+  }
+
+  try {
+    const fields = [];
+    const values = [];
+
+    if (courseId) {
+      fields.push('course_id = ?');
+      values.push(courseId);
     }
 
-    try {
-        // Build update query dynamically
-        const fields = [];
-        const values = [];
-
-        if (courseId) {
-            fields.push('course_id = ?');
-            values.push(courseId);
-        }
-
-        if (title) {
-            fields.push('title = ?');
-            values.push(title);
-        }
-
-        if (active) {
-            fields.push('active = ?');
-            values.push(active);
-        }
-
-        values.push(id); // for WHERE clause
-
-        const stmt = db.prepare(`
-          UPDATE modules
-          SET ${fields.join(', ')}
-          WHERE id = ?
-        `);
-
-        const result = stmt.run(...values);
-
-        if (result.changes === 0) {
-            return res.status(404).json({ error: 'Module not found or no changes made' });
-        }
-
-        res.json({ message: 'Module updated successfully' });
-    } catch (err) {
-        console.error('Error updating student profile:', err);
-        res.status(500).json({ error: 'Internal server error' });
+    if (title) {
+      fields.push('title = ?');
+      values.push(title);
     }
-    if ( !id ) {
-        return res.status(400).json({ error: 'Invalid Parameter, missing Id ' });
+
+    if (typeof active !== 'undefined') {
+      fields.push('active = ?');
+      values.push(active);
     }
+
+    values.push(id);
+
+    const [result] = await pool.execute(
+      `UPDATE modules SET ${fields.join(', ')} WHERE id = ?`,
+      values
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Module not found or no changes made' });
+    }
+
+    res.json({ message: 'Module updated successfully' });
+  } catch (err) {
+    console.error('Error updating module:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 //create a project
-router.post('/projects', (req, res) => {
-    const { title, moduleId, instructions, rubric } = req.body;
+router.post('/projects', async (req, res) => {
+  const { title, moduleId, instructions, rubric } = req.body;
 
-    if (!title, !moduleId, !instructions, !rubric) {
-        return res.status(400).json({ error: 'module_id, instructions, rubric and title are required' });
-    }
+  if (!title || !moduleId || !instructions || !rubric) {
+    return res.status(400).json({ error: 'module_id, instructions, rubric and title are required' });
+  }
 
-    try {
+  try {
+    const [result] = await pool.execute(
+      'INSERT INTO projects (title, module_id, instructions, rubric) VALUES (?, ?, ?, ?)',
+      [title, moduleId, instructions || null, rubric]
+    );
+    res.status(201).json({ message: 'Project created successfully', id: result.insertId });
+  } catch (err) {
+    console.error('Error creating project:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
-        db.prepare(`
-      INSERT INTO projects (title, module_id, instructions, rubric)
-      VALUES (?, ?, ?, ?)
-    `).run(title, moduleId, instructions || null, rubric);
+// Delete a project
+router.delete('/projects/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ error: 'Invalid Parameter, missing Id' });
+  }
 
-        res.status(201).json({ message: 'Project created successfully', id });
-    } catch (err) {
-        console.error('Error creating project:', err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
+  try {
+    await pool.execute('DELETE FROM projects WHERE id = ?', [id]);
+    res.status(201).json({ message: 'Project deleted', moduleId: id });
+  } catch (err) {
+    console.error('Error deleting project:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 //edit a project
-router.put('/projects/:id', (req, res) => {
+router.put('/projects/:id', async (req, res) => {
     const { id } = req.params;
     const { title, moduleId, instructions, rubric } = req.body;
 
-    if (!title, !moduleId, !instructions) {
+    if (!title || !moduleId || !instructions) {
         return res.status(400).json({ error: 'module_id, instructions and title are required' });
     }
 
     try {
-        // Build update query dynamically
         const fields = [];
         const values = [];
 
@@ -295,7 +325,6 @@ router.put('/projects/:id', (req, res) => {
             values.push(moduleId);
         }
 
-
         if (rubric) {
             fields.push('rubric = ?');
             values.push(rubric);
@@ -303,15 +332,12 @@ router.put('/projects/:id', (req, res) => {
 
         values.push(id); // for WHERE clause
 
-        const stmt = db.prepare(`
-          UPDATE projects
-          SET ${fields.join(', ')}
-          WHERE id = ?
-        `);
+        const [result] = await pool.execute(
+            `UPDATE projects SET ${fields.join(', ')} WHERE id = ?`,
+            values
+        );
 
-        const result = stmt.run(...values);
-
-        if (result.changes === 0) {
+        if (result.affectedRows === 0) {
             return res.status(404).json({ error: 'Project not found or no changes made' });
         }
 
@@ -322,39 +348,20 @@ router.put('/projects/:id', (req, res) => {
     }
 });
 
-// Delete a module
-router.delete('/projects/:id', (req, res) => {
-    const { id } = req.params;
-
-    if ( !id ) {
-        return res.status(400).json({ error: 'Invalid Parameter, missing Id ' });
-    }
-
-    db.prepare(`
-    DELETE FROM projects WHERE id=?
-  `).run(id);
-
-    res.status(201).json({ message: 'Project deleted', moduleId: id });
-});
-
 // Fetch student modules
-router.get('/student/modules', (req, res) => {
-    router.use(checkEnrollment);
-    try {
+router.get('/student/modules', async (req, res) => {
+  router.use(checkEnrollment);
 
-        // Fetch modules belonging to that course, ordered by their order
-        const modules = db.prepare(`
-      SELECT id, title
-      FROM modules
-      WHERE course_id = ?
-      ORDER BY created_at DESC
-    `).all(req.user.course_id);
-
-        res.json({ modules });
-    } catch (err) {
-        console.error('Error fetching modules for student:', err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
+  try {
+    const [modules] = await pool.execute(
+      'SELECT id, title FROM modules WHERE course_id = ? ORDER BY created_at DESC',
+      [req.user.course_id]
+    );
+    res.json({ modules });
+  } catch (err) {
+    console.error('Error fetching modules for student:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // GET all paystack Transactions

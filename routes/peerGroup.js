@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../db'); // your better-sqlite3 instance
+const pool = require('../db');
 
 const { uniqueNamesGenerator, colors, animals } = require('unique-names-generator');
 
@@ -30,22 +30,23 @@ function chunkArray(array, size) {
 }
 
 // Get all peer groups
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    // Fetch all groups with leader info
-    const groups = db.prepare(`
+    // Fetch peer groups with leader info
+    const [groups] = await pool.execute(`
       SELECT
         pg.id AS group_id,
         pg.name AS group_name,
         p.id AS leader_id,
         p.fullname AS leader_name,
         u.email AS leader_email
-      FROM peer_groups pg JOIN users u on u.id = pg.leader_id
+      FROM peer_groups pg
+      JOIN users u ON u.id = pg.leader_id
       LEFT JOIN student_profiles p ON pg.leader_id = p.id
-    `).all();
+    `);
 
-    // Fetch all members with group relation
-    const members = db.prepare(`
+    // Fetch all group members
+    const [members] = await pool.execute(`
       SELECT
         pgm.group_id,
         u.id AS user_id,
@@ -54,9 +55,9 @@ router.get('/', (req, res) => {
       FROM peer_group_members pgm
       JOIN users u ON pgm.user_id = u.id
       JOIN student_profiles p ON pgm.user_id = p.id
-    `).all();
+    `);
 
-    // Combine leader and members per group
+    // Map results
     const result = groups.map(group => {
       const groupMembers = members
         .filter(m => m.group_id === group.group_id)
@@ -74,93 +75,45 @@ router.get('/', (req, res) => {
     });
 
     res.status(200).json(result);
-
   } catch (err) {
-    console.error(err);
+    console.error('Failed to fetch peer groups:', err);
     res.status(500).json({ message: 'Error retrieving peer groups' });
   }
 });
 
 // Get user peer group
-router.get('/me', (req, res) => {
+router.get('/me', async (req, res) => {
   try {
-    const usergroup = db.prepare(`
-      SELECT
-        pg.group_id as group_id
-      FROM peer_group_members pg WHERE pg.user_id = ?
-    `).get(req.user.id);
+    // Step 1: Get the group_id the current user belongs to
+    const [groupRow] = await pool.execute(`
+      SELECT pg.group_id AS group_id
+      FROM peer_group_members pg
+      WHERE pg.user_id = ?
+      LIMIT 1
+    `, [req.user.id]);
 
-    // Fetch all groupleader for user group
-    const groups = db.prepare(`
+    if (!groupRow.length) {
+      return res.status(404).json({ message: 'User is not in any peer group' });
+    }
+
+    const groupId = groupRow[0].group_id;
+
+    // Step 2: Get group and leader details
+    const [groups] = await pool.execute(`
       SELECT
         pg.id AS group_id,
         pg.name AS group_name,
         p.id AS leader_id,
         p.fullname AS leader_name,
         u.email AS leader_email
-      FROM peer_groups pg JOIN users u on u.id = pg.leader_id
-      LEFT JOIN student_profiles p ON pg.leader_id = p.id WHERE pg.id = ?
-    `).all(usergroup.group_id);
-
-    // Fetch all members with group relation
-    const members = db.prepare(`
-      SELECT
-        pgm.group_id,
-        u.id AS user_id,
-        p.fullname,
-        u.email
-      FROM peer_group_members pgm
-      JOIN users u ON pgm.user_id = u.id
-      JOIN student_profiles p ON pgm.user_id = p.id WHERE pgm.group_id = ?
-    `).all(usergroup.group_id);
-
-      console.log(members)
-
-    // Combine leader and members per group
-    const result = groups.map(group => {
-      const groupMembers = members
-        .filter(m => m.group_id === group.group_id)
-        .map(({ fullname, email }) => ({ fullname, email }));
-
-      return {
-        id: group.group_id,
-        name: group.group_name,
-        leader: {
-          name: group.leader_name,
-          email: group.leader_email
-        },
-        members: groupMembers
-      };
-    });
-
-
-    res.status(200).json(...result);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Error retrieving peer groups' });
-  }
-});
-
-
-// Get peer groups based on ID
-router.get('/:id', (req, res) => {
-    const { id } = req.params
-  try {
-    // Fetch all groups with leader info
-    const groups = db.prepare(`
-      SELECT
-        pg.id AS group_id,
-        pg.name AS group_name,
-        p.id AS leader_id,
-        p.fullname AS leader_name,
-        u.email AS leader_email
-      FROM peer_groups pg JOIN users u on u.id = pg.leader_id
+      FROM peer_groups pg
+      JOIN users u ON u.id = pg.leader_id
       LEFT JOIN student_profiles p ON pg.leader_id = p.id
-    `).all();
+      WHERE pg.id = ?
+    `, [groupId]);
 
-    // Fetch all members with group relation
-    const members = db.prepare(`
+    // Step 3: Get group members
+    const [members] = await pool.execute(`
       SELECT
         pgm.group_id,
         u.id AS user_id,
@@ -169,13 +122,12 @@ router.get('/:id', (req, res) => {
       FROM peer_group_members pgm
       JOIN users u ON pgm.user_id = u.id
       JOIN student_profiles p ON pgm.user_id = p.id
-    `).all();
+      WHERE pgm.group_id = ?
+    `, [groupId]);
 
-    // Combine leader and members per group
+    // Step 4: Combine leader and members
     const result = groups.map(group => {
-      const groupMembers = members
-        .filter(m => m.group_id === group.group_id)
-        .map(({ fullname, email }) => ({ fullname, email }));
+      const groupMembers = members.map(({ fullname, email }) => ({ fullname, email }));
 
       return {
         id: group.group_id,
@@ -188,67 +140,130 @@ router.get('/:id', (req, res) => {
       };
     });
 
-      const data = result.filter((value) => value.id == id)
-
-    res.status(200).json(...data);
+    res.status(200).json(result[0]); // Only one group for /me
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Error retrieving peer groups' });
+    console.error('Failed to fetch peer group for user:', err);
+    res.status(500).json({ message: 'Error retrieving peer group' });
+  }
+});
+
+// Get peer groups based on ID
+router.get('/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Fetch group with leader info
+    const [groups] = await pool.execute(`
+      SELECT
+        pg.id AS group_id,
+        pg.name AS group_name,
+        p.id AS leader_id,
+        p.fullname AS leader_name,
+        u.email AS leader_email
+      FROM peer_groups pg
+      JOIN users u ON u.id = pg.leader_id
+      LEFT JOIN student_profiles p ON pg.leader_id = p.id
+      WHERE pg.id = ?
+    `, [id]);
+
+    if (!groups.length) {
+      return res.status(404).json({ message: 'Peer group not found' });
+    }
+
+    // Fetch members of the group
+    const [members] = await pool.execute(`
+      SELECT
+        pgm.group_id,
+        u.id AS user_id,
+        p.fullname,
+        u.email
+      FROM peer_group_members pgm
+      JOIN users u ON pgm.user_id = u.id
+      JOIN student_profiles p ON pgm.user_id = p.id
+      WHERE pgm.group_id = ?
+    `, [id]);
+
+    const group = groups[0];
+
+    const result = {
+      id: group.group_id,
+      name: group.group_name,
+      leader: {
+        name: group.leader_name,
+        email: group.leader_email
+      },
+      members: members.map(({ fullname, email }) => ({ fullname, email }))
+    };
+
+    res.status(200).json(result);
+
+  } catch (err) {
+    console.error('Error retrieving peer group:', err);
+    res.status(500).json({ message: 'Error retrieving peer group' });
   }
 });
 
 //Automatically Assign Group...
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
+  const conn = await pool.getConnection();
+
   try {
-    const ungroupedUsers = db.prepare(`
-      SELECT u.id, p.fullname, u.email FROM users u JOIN student_profiles p on u.id=p.id
+    // Step 1: Get users not yet in any group
+    const [ungroupedUsers] = await conn.execute(`
+      SELECT u.id, p.fullname, u.email
+      FROM users u
+      JOIN student_profiles p ON u.id = p.id
       WHERE u.id NOT IN (
         SELECT user_id FROM peer_group_members
       )
-    `).all();
+    `);
 
     if (ungroupedUsers.length < 4) {
       return res.status(200).json({ message: 'Not enough users to form a new group.' });
     }
 
     const chunks = chunkArray(ungroupedUsers, 4);
+    const createdGroups = [];
 
-    const insertGroup = db.prepare(`INSERT INTO peer_groups (name, leader_id) VALUES (?, ?)`);
-    const insertMember = db.prepare(`INSERT INTO peer_group_members (user_id, group_id) VALUES (?, ?)`);
+    await conn.beginTransaction();
 
-    const transaction = db.transaction(() => {
-      const createdGroups = [];
+    for (const groupUsers of chunks) {
+      if (groupUsers.length < 4) continue; // Optionally skip groups with fewer than 4
 
-      chunks.forEach((groupUsers, idx) => {
-        if (groupUsers.length < 4) return; // optional: skip if group < 4
-
-        const leaderId = groupUsers[0].id;
-        const groupName = uniqueNamesGenerator({
-          dictionaries: [techAdjectives, techNouns],
-          separator: '-',
-          style: 'capital',
-        });
-
-        const groupResult = insertGroup.run(groupName, leaderId);
-        const groupId = groupResult.lastInsertRowid;
-
-        groupUsers.forEach(user => {
-          insertMember.run(user.id, groupId);
-        });
-
-        createdGroups.push({ id: groupId, name: groupName });
+      const leaderId = groupUsers[0].id;
+      const groupName = uniqueNamesGenerator({
+        dictionaries: [techAdjectives, techNouns],
+        separator: '-',
+        style: 'capital',
       });
 
-      return createdGroups;
-    });
+      const [groupResult] = await conn.execute(
+        `INSERT INTO peer_groups (name, leader_id) VALUES (?, ?)`,
+        [groupName, leaderId]
+      );
 
-    const groups = transaction();
-    res.status(201).json({ message: 'New groups formed', groups });
+      const groupId = groupResult.insertId;
+
+      for (const user of groupUsers) {
+        await conn.execute(
+          `INSERT INTO peer_group_members (user_id, group_id) VALUES (?, ?)`,
+          [user.id, groupId]
+        );
+      }
+
+      createdGroups.push({ id: groupId, name: groupName });
+    }
+
+    await conn.commit();
+    res.status(201).json({ message: 'New groups formed', groups: createdGroups });
 
   } catch (err) {
-    console.error(err);
+    await conn.rollback();
+    console.error('Error grouping users:', err);
     res.status(500).json({ message: 'Error grouping users' });
+  } finally {
+    conn.release();
   }
 });
 

@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const router = express.Router()
-const db = require('../db')
+const pool = require('../db')
 const axios = require('axios')
 
 function parseAIResponse(aiResponse) {
@@ -61,22 +61,25 @@ async function readGoogleDriveFileText(driveUrl) {
 }
 
 router.post('/', async (req, res) => {
-    const { projectId, file_link, file_type } = req.body;
+  const { projectId, file_link, file_type } = req.body;
 
-    const studentCode = await readGoogleDriveFileText(file_link)
+  if (!projectId || !file_link || !file_type) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
 
-    if (!projectId || !file_link || !file_type) {
-        return res.status(400).json({ error: 'Missing required fields' });
-    }
+  try {
+    const studentCode = await readGoogleDriveFileText(file_link);
 
-    const project = db.prepare(`
-      SELECT p.id, p.title as title, p.instructions as instructions, p.rubric as rubric
+    const [projects] = await pool.execute(`
+      SELECT p.id, p.title, p.instructions, p.rubric
       FROM projects p WHERE p.id = ?
-    `).get(projectId);
+    `, [projectId]);
 
-    //fetched instructions and rubric from database
-    const instructions = project.instructions
-    const rubric = project.rubric
+    const project = projects[0];
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
 
     const systemPrompt = `
 You are an expert programming instructor grading a student project.
@@ -94,10 +97,10 @@ Do NOT add anything else. Follow these rules strictly.
 REMEMBER DO NOT ADD ANYTHING ELSE. Return just the json
 
 Instructions:
-${instructions}
+${project.instructions}
 
 Rubric:
-${rubric}
+${project.rubric}
 `;
 
     const userPrompt = `
@@ -107,54 +110,47 @@ ${studentCode}
 \`\`\`
 `;
 
-    // This is the ai model used for grading
-    const grader = 'deepseek/deepseek-r1-0528:free'
+    const grader = 'deepseek/deepseek-r1-0528:free';
 
-    try {
-        const response = await axios.post(
-            'https://openrouter.ai/api/v1/chat/completions',
-            {
-                model: grader, // or another valid model from https://openrouter.ai/models
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt }
-                ],
-                temperature: 0.3
-            },
-            {
-                headers: {
-                    'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                    'Content-Type': 'application/json'
-                }
-            }
-        );
+    const response = await axios.post(
+      'https://openrouter.ai/api/v1/chat/completions',
+      {
+        model: grader,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.3
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
-        const rawMessage = response.data.choices[0].message.content;
+    const rawMessage = response.data.choices[0].message.content;
+    const feedback = parseAIResponse(rawMessage);
+    const score = feedback.score;
 
-        const feedback = parseAIResponse(rawMessage)
-
-        const score = feedback .score
-        console.log(score)
-
-        // Save to SQLite
-        const stmt = db.prepare(`
+    await pool.execute(`
       INSERT INTO evaluations (student_id, project_id, file_link, score, feedback, grader)
       VALUES (?, ?, ?, ?, ?, ?)
-    `)
-        stmt.run(
-            req.user.id,
-            projectId,
-            file_link,
-            score,
-            JSON.stringify(feedback), // Store array as text
-            grader
-        )
+    `, [
+      req.user.id,
+      projectId,
+      file_link,
+      score,
+      JSON.stringify(feedback),
+      grader
+    ]);
 
-        res.json(feedback)
-    } catch (error) {
-        console.error('OpenRouter API error:', error.response?.data || error.message);
-        res.status(500).json({ error: 'Error grading submission' });
-    }
+    res.json(feedback);
+  } catch (error) {
+    console.error('Grading error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Error grading submission' });
+  }
 });
 
 module.exports = router
