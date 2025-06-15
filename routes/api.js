@@ -236,7 +236,7 @@ router.get('/projects/:id', async (req, res) => {
 
   try {
     const [projectRows] = await pool.execute(`
-      SELECT p.id, p.title, p.instructions, m.id AS moduleId, p.rubric
+      SELECT p.id, p.title, p.instructions, m.id AS moduleId, p.rubric, p.project_hint
       FROM projects p
       JOIN modules m ON m.id = p.module_id
       WHERE p.id = ?

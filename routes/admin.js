@@ -263,7 +263,7 @@ router.put('/modules/:id', async (req, res) => {
 
 //create a project
 router.post('/projects', async (req, res) => {
-  const { title, moduleId, instructions, rubric } = req.body;
+  const { title, moduleId, instructions, content, rubric } = req.body;
 
   if (!title || !moduleId || !instructions || !rubric) {
     return res.status(400).json({ error: 'module_id, instructions, rubric and title are required' });
@@ -271,8 +271,8 @@ router.post('/projects', async (req, res) => {
 
   try {
     const [result] = await pool.execute(
-      'INSERT INTO projects (title, module_id, instructions, rubric) VALUES (?, ?, ?, ?)',
-      [title, moduleId, instructions || null, rubric]
+      'INSERT INTO projects (title, module_id, instructions, project_hint, rubric) VALUES (?, ?, ?, ?, ?)',
+      [title, moduleId, instructions || null, content || null, rubric]
     );
     res.status(201).json({ message: 'Project created successfully', id: result.insertId });
   } catch (err) {
@@ -300,7 +300,7 @@ router.delete('/projects/:id', async (req, res) => {
 //edit a project
 router.put('/projects/:id', async (req, res) => {
     const { id } = req.params;
-    const { title, moduleId, instructions, rubric } = req.body;
+    const { title, moduleId, instructions, content, rubric } = req.body;
 
     if (!title || !moduleId || !instructions) {
         return res.status(400).json({ error: 'module_id, instructions and title are required' });
@@ -323,6 +323,12 @@ router.put('/projects/:id', async (req, res) => {
         if (moduleId) {
             fields.push('module_id = ?');
             values.push(moduleId);
+        }
+
+
+        if (content) {
+            fields.push('project_hint = ?');
+            values.push(content);
         }
 
         if (rubric) {
