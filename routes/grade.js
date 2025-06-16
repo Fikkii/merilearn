@@ -134,22 +134,27 @@ ${studentCode}
     const feedback = parseAIResponse(rawMessage);
     const score = feedback.score;
 
-    await pool.execute(`
-      INSERT INTO evaluations (student_id, project_id, file_link, score, feedback, grader)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `, [
-      req.user.id,
-      projectId,
-      file_link,
-      score,
-      JSON.stringify(feedback),
-      grader
-    ]);
+      await pool.execute(`
+  INSERT INTO evaluations (student_id, project_id, file_link, score, feedback, grader)
+  VALUES (?, ?, ?, ?, ?, ?)
+  ON DUPLICATE KEY UPDATE
+    file_link = VALUES(file_link),
+    score = VALUES(score),
+    feedback = VALUES(feedback),
+    grader = VALUES(grader)
+`, [
+    req.user.id,
+    projectId,
+    file_link,
+    score,
+    JSON.stringify(feedback),
+    grader
+]);
 
-    res.json(feedback);
+      res.json(feedback);
   } catch (error) {
-    console.error('Grading error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Error grading submission' });
+      console.error('Grading error:', error.response?.data || error.message);
+      res.status(500).json({ error: 'Error grading submission' });
   }
 });
 

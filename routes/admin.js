@@ -140,161 +140,165 @@ router.put('/courses/:id', useUploader('/uploads/courses'), async (req, res) => 
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    const imagePath = path.join(process.cwd(), rows[0].cover_img_url);
-    await fs.unlinkSync(imagePath) // ignore if file not found
+      const imagePath = path.join(process.cwd(), rows[0].cover_img_url);
+      try {
+          await fs.unlinkSync(imagePath) // ignore if file not found
+      } catch (e) {
+          console.log(e)
+      }
 
-    const [result] = await pool.execute(
-      'UPDATE courses SET title = ?, cover_img_url = ?, description = ?, price = ? WHERE id = ?',
-      [title, req.file.uploadUrl, description || null, price, id]
-    );
+      const [result] = await pool.execute(
+          'UPDATE courses SET title = ?, cover_img_url = ?, description = ?, price = ? WHERE id = ?',
+          [title, req.file.uploadUrl, description || null, price, id]
+      );
 
-    res.status(201).json({ message: 'Course Edited Successfully', courseId: id });
+      res.status(201).json({ message: 'Course Edited Successfully', courseId: id });
   } catch (err) {
-    console.error('Error updating course:', err);
-    res.status(500).json({ error: 'Internal server error' });
+      console.error('Error updating course:', err);
+      res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // Delete a course
 router.delete('/courses/:id', async (req, res) => {
-  const { id } = req.params;
-  if (!id) return res.status(400).json({ error: 'id is required' });
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'id is required' });
 
-  try {
-    const [rows] = await pool.execute('SELECT cover_img_url FROM courses WHERE id = ?', [id]);
+    try {
+        const [rows] = await pool.execute('SELECT cover_img_url FROM courses WHERE id = ?', [id]);
 
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Course not found' });
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Course not found' });
+        }
+
+        const imagePath = path.join(process.cwd(), rows[0].cover_img_url);
+        fs.unlinkSync(imagePath)
+
+        await pool.execute('DELETE FROM courses WHERE id = ?', [id]);
+
+        res.status(201).json({ message: 'Course Deleted Successfully', courseId: id });
+    } catch (err) {
+        console.error('Error deleting course:', err);
+        res.status(500).json({ message: 'Server error', error: err });
     }
-
-    const imagePath = path.join(process.cwd(), rows[0].cover_img_url);
-    fs.unlinkSync(imagePath)
-
-    await pool.execute('DELETE FROM courses WHERE id = ?', [id]);
-
-    res.status(201).json({ message: 'Course Deleted Successfully', courseId: id });
-  } catch (err) {
-    console.error('Error deleting course:', err);
-    res.status(500).json({ message: 'Server error', error: err });
-  }
 });
 
 // Create a module
 router.post('/modules', async (req, res) => {
-  const { courseId, title, active } = req.body;
-  if (!courseId || !title) {
-    return res.status(400).json({ error: 'courseId and title are required' });
-  }
+    const { courseId, title, active } = req.body;
+    if (!courseId || !title) {
+        return res.status(400).json({ error: 'courseId and title are required' });
+    }
 
-  try {
-    const [result] = await pool.execute(
-      'INSERT INTO modules (course_id, title, active) VALUES (?, ?, ?)',
-      [courseId, title, active]
-    );
+    try {
+        const [result] = await pool.execute(
+            'INSERT INTO modules (course_id, title, active) VALUES (?, ?, ?)',
+            [courseId, title, active]
+        );
 
-    res.status(201).json({ message: 'Module created', moduleId: result.insertId });
-  } catch (err) {
-    console.error('Error creating module:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+        res.status(201).json({ message: 'Module created', moduleId: result.insertId });
+    } catch (err) {
+        console.error('Error creating module:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 // Delete a module
 router.delete('/modules/:id', async (req, res) => {
-  const { id } = req.params;
-  if (!id) {
-    return res.status(400).json({ error: 'Invalid Parameter, missing Id' });
-  }
+    const { id } = req.params;
+    if (!id) {
+        return res.status(400).json({ error: 'Invalid Parameter, missing Id' });
+    }
 
-  try {
-    await pool.execute('DELETE FROM modules WHERE id = ?', [id]);
-    res.status(201).json({ message: 'Module deleted', moduleId: id });
-  } catch (err) {
-    console.error('Error deleting module:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    try {
+        await pool.execute('DELETE FROM modules WHERE id = ?', [id]);
+        res.status(201).json({ message: 'Module deleted', moduleId: id });
+    } catch (err) {
+        console.error('Error deleting module:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 // Edit a module
 router.put('/modules/:id', async (req, res) => {
-  const { id } = req.params;
-  const { courseId, title, active } = req.body;
+    const { id } = req.params;
+    const { courseId, title, active } = req.body;
 
-  if (!id || !courseId || !title) {
-    return res.status(400).json({ error: 'id, courseId, title are required' });
-  }
-
-  try {
-    const fields = [];
-    const values = [];
-
-    if (courseId) {
-      fields.push('course_id = ?');
-      values.push(courseId);
+    if (!id || !courseId || !title) {
+        return res.status(400).json({ error: 'id, courseId, title are required' });
     }
 
-    if (title) {
-      fields.push('title = ?');
-      values.push(title);
+    try {
+        const fields = [];
+        const values = [];
+
+        if (courseId) {
+            fields.push('course_id = ?');
+            values.push(courseId);
+        }
+
+        if (title) {
+            fields.push('title = ?');
+            values.push(title);
+        }
+
+        if (typeof active !== 'undefined') {
+            fields.push('active = ?');
+            values.push(active);
+        }
+
+        values.push(id);
+
+        const [result] = await pool.execute(
+            `UPDATE modules SET ${fields.join(', ')} WHERE id = ?`,
+            values
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Module not found or no changes made' });
+        }
+
+        res.json({ message: 'Module updated successfully' });
+    } catch (err) {
+        console.error('Error updating module:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    if (typeof active !== 'undefined') {
-      fields.push('active = ?');
-      values.push(active);
-    }
-
-    values.push(id);
-
-    const [result] = await pool.execute(
-      `UPDATE modules SET ${fields.join(', ')} WHERE id = ?`,
-      values
-    );
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Module not found or no changes made' });
-    }
-
-    res.json({ message: 'Module updated successfully' });
-  } catch (err) {
-    console.error('Error updating module:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 //create a project
 router.post('/projects', async (req, res) => {
-  const { title, moduleId, instructions, content, rubric } = req.body;
+    const { title, moduleId, instructions, content, rubric } = req.body;
 
-  if (!title || !moduleId || !instructions || !rubric) {
-    return res.status(400).json({ error: 'module_id, instructions, rubric and title are required' });
-  }
+    if (!title || !moduleId || !instructions || !rubric) {
+        return res.status(400).json({ error: 'module_id, instructions, rubric and title are required' });
+    }
 
-  try {
-    const [result] = await pool.execute(
-      'INSERT INTO projects (title, module_id, instructions, project_hint, rubric) VALUES (?, ?, ?, ?, ?)',
-      [title, moduleId, instructions || null, content || null, rubric]
-    );
-    res.status(201).json({ message: 'Project created successfully', id: result.insertId });
-  } catch (err) {
-    console.error('Error creating project:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    try {
+        const [result] = await pool.execute(
+            'INSERT INTO projects (title, module_id, instructions, project_hint, rubric) VALUES (?, ?, ?, ?, ?)',
+            [title, moduleId, instructions || null, content || null, rubric]
+        );
+        res.status(201).json({ message: 'Project created successfully', id: result.insertId });
+    } catch (err) {
+        console.error('Error creating project:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 // Delete a project
 router.delete('/projects/:id', async (req, res) => {
-  const { id } = req.params;
-  if (!id) {
-    return res.status(400).json({ error: 'Invalid Parameter, missing Id' });
-  }
+    const { id } = req.params;
+    if (!id) {
+        return res.status(400).json({ error: 'Invalid Parameter, missing Id' });
+    }
 
-  try {
-    await pool.execute('DELETE FROM projects WHERE id = ?', [id]);
-    res.status(201).json({ message: 'Project deleted', moduleId: id });
-  } catch (err) {
-    console.error('Error deleting project:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    try {
+        await pool.execute('DELETE FROM projects WHERE id = ?', [id]);
+        res.status(201).json({ message: 'Project deleted', moduleId: id });
+    } catch (err) {
+        console.error('Error deleting project:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 //edit a project
@@ -356,18 +360,18 @@ router.put('/projects/:id', async (req, res) => {
 
 // Fetch student modules
 router.get('/student/modules', async (req, res) => {
-  router.use(checkEnrollment);
+    router.use(checkEnrollment);
 
-  try {
-    const [modules] = await pool.execute(
-      'SELECT id, title FROM modules WHERE course_id = ? ORDER BY created_at DESC',
-      [req.user.course_id]
-    );
-    res.json({ modules });
-  } catch (err) {
-    console.error('Error fetching modules for student:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    try {
+        const [modules] = await pool.execute(
+            'SELECT id, title FROM modules WHERE course_id = ? ORDER BY created_at DESC',
+            [req.user.course_id]
+        );
+        res.json({ modules });
+    } catch (err) {
+        console.error('Error fetching modules for student:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 // GET all paystack Transactions
