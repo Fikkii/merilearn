@@ -92,7 +92,7 @@ router.get('/metrics', async (req, res) => {
 
     // Fetch user average score based on evaluation
     const evaluationSql = `
-      SELECT ROUND(AVG(score), 2) AS average_score, COUNT(*) AS total_evaluation
+      SELECT ROUND(AVG(score), 1) AS average_score, COUNT(*) AS total_evaluation
       FROM evaluations
       WHERE student_id = ?
     `;
