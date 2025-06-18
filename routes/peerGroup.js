@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 
+const checkEnrollment = require('../middleware/enroll')
+
+//Make sure the user is enrolled
+router.use(checkEnrollment)
+
 const { uniqueNamesGenerator, colors, animals } = require('unique-names-generator');
 
 const techAdjectives = [
@@ -208,28 +213,31 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   const conn = await pool.getConnection();
 
+    const groupsize = 4
+
   try {
-    // Step 1: Get users not yet in any group
+    // Step 1: Get users belonging to same learning track but not yet in any group
     const [ungroupedUsers] = await conn.execute(`
       SELECT u.id, p.fullname, u.email
       FROM users u
       JOIN student_profiles p ON u.id = p.id
-      WHERE u.id NOT IN (
+      JOIN enrollments e ON u.id = e.student_id
+      WHERE e.course_id = ? AND u.id NOT IN (
         SELECT user_id FROM peer_group_members
       )
-    `);
+    `, [req.user.course_id]);
 
-    if (ungroupedUsers.length < 4) {
+    if (ungroupedUsers.length < groupsize) {
       return res.status(200).json({ message: 'Not enough users to form a new group.' });
     }
 
-    const chunks = chunkArray(ungroupedUsers, 4);
+    const chunks = chunkArray(ungroupedUsers, groupsize);
     const createdGroups = [];
 
     await conn.beginTransaction();
 
     for (const groupUsers of chunks) {
-      if (groupUsers.length < 4) continue; // Optionally skip groups with fewer than 4
+      if (groupUsers.length < groupsize) continue; // Optionally skip groups with fewer than 4
 
       const leaderId = groupUsers[0].id;
       const groupName = uniqueNamesGenerator({
@@ -262,6 +270,54 @@ router.post('/', async (req, res) => {
     await conn.rollback();
     console.error('Error grouping users:', err);
     res.status(500).json({ message: 'Error grouping users' });
+  } finally {
+    conn.release();
+  }
+});
+
+//User leave peer group...
+router.delete('/', async (req, res) => {
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.execute(`
+      DELETE FROM peer_groups
+    `);
+
+    await conn.commit();
+    res.status(201).json({ message: 'All Groups was deleted successfully'});
+
+  } catch (err) {
+    await conn.rollback();
+    console.error('Error deleting user group:', err);
+    res.status(500).json({ message: 'Error deleting group', err });
+  } finally {
+    conn.release();
+  }
+});
+
+//Admin remove user from peer group...
+router.delete('/:groupId', async (req, res) => {
+    const { groupId } = req.params
+  const conn = await pool.getConnection();
+
+    if (!groupId) {
+      return res.status(200).json({ message: 'Peer group id is required...' });
+    }
+
+  try {
+
+    await conn.execute(`
+      DELETE FROM peer_groups WHERE id= ?
+    `, [groupId]);
+
+    await conn.commit();
+    res.status(201).json({ message: 'Group was deleted successfully'});
+
+  } catch (err) {
+    await conn.rollback();
+    console.error('Error deleting user group:', err);
+    res.status(500).json({ message: 'Error deleting group', err });
   } finally {
     conn.release();
   }

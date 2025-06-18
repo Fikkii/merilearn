@@ -429,4 +429,36 @@ router.get('/projects', async (req, res) => {
   }
 });
 
+//User leave peer group...
+router.delete('/', async (req, res) => {
+  const conn = await pool.getConnection();
+
+  try {
+    // Step 1: Get users belonging to same learning track but not yet in any group
+    const [peerMember] = await conn.execute(`
+      SELECT group_id
+        FROM peer_group_members WHERE user_id = ?
+    `, [req.user.id]);
+
+    if (!peerMember.length) {
+      return res.status(200).json({ message: 'unable to find user' });
+    }
+
+    await conn.execute(`
+      DELETE FROM peer_groups WHERE id= ?
+    `, [peerMember[0].group_id]);
+
+    await conn.commit();
+    res.status(201).json({ message: 'Group was deleted successfully'});
+
+  } catch (err) {
+    await conn.rollback();
+    console.error('Error deleting user group:', err);
+    res.status(500).json({ message: 'Error deleting group', err });
+  } finally {
+    conn.release();
+  }
+});
+
+
 module.exports = router;

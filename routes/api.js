@@ -183,9 +183,13 @@ router.get('/topics/:id', async (req, res) => {
 router.get('/students', async (req, res) => {
   try {
     const [users] = await pool.execute(`
-      SELECT u.id, s.fullname, u.email
+      SELECT u.id, s.fullname, u.email,
+      CASE WHEN e.student_id IS NOT NULL THEN 1 ELSE 0 END AS is_enrolled,
+      CASE WHEN pgm.user_id IS NOT NULL THEN 1 ELSE 0 END AS is_grouped
       FROM users u
-      JOIN student_profiles s ON s.id = u.id
+      LEFT JOIN student_profiles s ON s.id = u.id
+      LEFT JOIN enrollments e ON e.student_id = u.id
+      LEFT JOIN peer_group_members pgm ON pgm.user_id = u.id
     `);
 
     res.json(users);
