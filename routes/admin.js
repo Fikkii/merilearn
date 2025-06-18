@@ -374,6 +374,22 @@ router.get('/student/modules', async (req, res) => {
     }
 });
 
+// Delete a student
+router.delete('/students/:id', async (req, res) => {
+    const { id } = req.params;
+    if (!id) {
+        return res.status(400).json({ error: 'Invalid Parameter, missing Id' });
+    }
+
+    try {
+        await pool.execute('DELETE FROM users WHERE id = ?', [id]);
+        res.status(201).json({ message: 'User deleted', moduleId: id });
+    } catch (err) {
+        console.error('Error deleting User:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // GET all paystack Transactions
 router.get('/transactions', async (req, res) => {
     try {

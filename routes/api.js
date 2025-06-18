@@ -179,6 +179,7 @@ router.get('/topics/:id', async (req, res) => {
   }
 });
 
+//Fetch all students
 router.get('/students', async (req, res) => {
   try {
     const [users] = await pool.execute(`
@@ -188,6 +189,39 @@ router.get('/students', async (req, res) => {
     `);
 
     res.json(users);
+  } catch (err) {
+    console.error('Failed to fetch students:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+//Fetch single student
+router.get('/students/:id', async (req, res) => {
+    const { id } = req.params
+  try {
+    const [users] = await pool.execute(`
+      SELECT u.id, s.fullname, u.email
+      FROM users u
+      JOIN student_profiles s ON s.id = u.id WHERE u.id = ?
+    `, [id]);
+
+    const [peergroup] = await pool.execute(`
+      SELECT pg.name as name, pg.created_at
+      FROM peer_group_members pgm
+      JOIN peer_groups pg ON pg.id = pgm.group_id WHERE pgm.user_id = ?
+    `, [id]);
+
+
+    const [enrollments] = await pool.execute(`
+      SELECT e.student_id, c.title as title
+      FROM enrollments e
+      JOIN courses c ON c.id = e.course_id WHERE e.student_id = ?
+    `, [id]);
+
+      users[0].enrollment = enrollments[0]?.title
+      users[0].peer = peergroup[0]?.name
+
+    res.json(...users);
   } catch (err) {
     console.error('Failed to fetch students:', err);
     res.status(500).json({ error: 'Internal server error' });
