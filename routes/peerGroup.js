@@ -208,7 +208,7 @@ router.get('/:id', async (req, res) => {
 // Automatically Assign Group Across All Courses
 router.post('/', async (req, res) => {
   const conn = await pool.getConnection();
-  const groupsize = 4;
+  const groupsize = 3;
 
   try {
     // Step 1: Get all ungrouped students with course info
