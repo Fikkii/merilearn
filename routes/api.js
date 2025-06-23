@@ -118,7 +118,7 @@ router.get('/modules/:id', async (req, res) => {
 router.get('/modules', async (req, res) => {
   try {
     const [modules] = await pool.execute(`
-      SELECT m.id, m.title, c.title AS course_title, m.active AS status
+      SELECT m.id, m.title, c.title AS course_title, c.id as course_id, m.active AS status
       FROM modules m
       JOIN courses c ON c.id = m.course_id
     `);
@@ -185,10 +185,12 @@ router.get('/students', async (req, res) => {
     const [users] = await pool.execute(`
       SELECT u.id, s.fullname, u.email,
       CASE WHEN e.student_id IS NOT NULL THEN 1 ELSE 0 END AS is_enrolled,
-      CASE WHEN pgm.user_id IS NOT NULL THEN 1 ELSE 0 END AS is_grouped
+      CASE WHEN pgm.user_id IS NOT NULL THEN 1 ELSE 0 END AS is_grouped,
+      c.title as course_title
       FROM users u
       LEFT JOIN student_profiles s ON s.id = u.id
       LEFT JOIN enrollments e ON e.student_id = u.id
+      LEFT JOIN courses c ON c.id = e.course_id
       LEFT JOIN peer_group_members pgm ON pgm.user_id = u.id
     `);
 
@@ -256,9 +258,10 @@ router.get('/enrollments', async (req, res) => {
 router.get('/projects', async (req, res) => {
   try {
     const [projects] = await pool.execute(`
-      SELECT p.id, p.title, p.instructions, p.rubric, m.id AS module_id
+      SELECT p.id, p.title, p.instructions, c.title as course_title, p.rubric, m.id AS module_id
       FROM projects p
       JOIN modules m ON m.id = p.module_id
+      JOIN courses c ON c.id = m.course_id
     `);
     res.json(projects);
   } catch (err) {
@@ -543,6 +546,25 @@ router.get('/verify/:reference',async (req, res) => {
         return res.status(500).json({ status: 'error', message: 'Verification failed' })
     }
 })
+
+// GET TOP ENROLLED COURSE
+router.get('/top/courses', async (req, res) => {
+  try {
+
+    // Fetch user info
+    const userSql = `
+      SELECT c.title as title, COUNT(c.id) as total
+      FROM enrollments e
+      JOIN courses c ON c.id = e.course_id GROUP BY c.id
+    `;
+    const [topCourses] = await pool.query(userSql, [req.user.id]);
+
+    res.json([ ...topCourses ]);
+  } catch (err) {
+    console.error('Error in Fetching Total Courses', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 module.exports = router;
 

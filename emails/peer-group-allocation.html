@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>You’ve been added to a group!</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f4f4f4;
+        margin: 0;
+        padding: 0;
+      }
+      .email-container {
+        background-color: #ffffff;
+        max-width: 600px;
+        margin: 40px auto;
+        padding: 30px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      .logo {
+        max-width: 160px;
+        margin-bottom: 10px;
+      }
+      .header h1 {
+        color: #5a32a3;
+        font-size: 22px;
+        margin-top: 0;
+      }
+      .content {
+        color: #333333;
+        font-size: 16px;
+        line-height: 1.6;
+      }
+      .cta-button {
+        display: inline-block;
+        padding: 12px 20px;
+        margin-top: 25px;
+        background-color: #5a32a3;
+        color: #ffffff;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: bold;
+      }
+      .footer {
+        margin-top: 40px;
+        font-size: 13px;
+        color: #999999;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="email-container">
+      <div class="header">
+        <!-- ✅ Company Logo -->
+        <img height="50" src="https://apigateway.merilearn.com.ng/uploads/logo.png" alt="MeriLearn Logo" class="logo" />
+
+        <h1>🎉 You've been added to a Peer Group!</h1>
+      </div>
+
+      <div class="content">
+        <p>Hi {{userName}},</p>
+
+        <p>
+          We’re excited to let you know that you’ve been successfully allocated to a peer group on
+          <strong>MeriLearn</strong>! This group is designed to help you learn collaboratively, stay motivated, and achieve your goals faster 🚀.
+        </p>
+
+        <p>
+          To get started, please log in to your dashboard and view your group information. You’ll be able to see your fellow group members and access group activities.
+        </p>
+
+        <p>
+          <strong>Before you continue:</strong> Don’t forget to
+          <span style="color: #5a32a3;"><strong>complete your profile</strong></span> (especially your name and photo). This helps your peers recognize and connect with you.
+        </p>
+
+        <a href="https://merilearn.com.ng/login" class="cta-button">Go to Dashboard</a>
+      </div>
+
+      <div class="footer">
+        &copy; 2025 MeriLearn · Empowering Tech Education
+      </div>
+    </div>
+  </body>
+</html>
+

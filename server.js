@@ -2,8 +2,11 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+
+//Api routes
 const apiRoutes = require('./routes/api');
 const ebookRoutes = require('./routes/ebook');
+
 const pool = require('./db'); // MySQL pool
 const { preloadEmailTemplates } = require('./utils/emailTemplates');
 const { useUploader } = require('./middleware/upload');

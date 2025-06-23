@@ -143,6 +143,7 @@ router.post('/enrollment', async (req, res) => {
 
     // Prepare and send email
     const html = getTemplate('enroll-welcome');
+
     req.mailer.sendMail({
       from: `"MerilLearn Course Enrollment Successful" <${process.env.SMTP_USER}>`,
       to: user.email,
@@ -267,7 +268,7 @@ router.get('/project', async (req, res) => {
   try {
     // Fetch project with module details
     const projectSql = `
-      SELECT p.id, p.title, p.instructions, p.rubric, m.id AS module_id
+      SELECT p.id, p.title, p.instructions, p.project_hint, p.rubric, m.id AS module_id
       FROM projects p
       JOIN modules m ON m.id = p.module_id
       WHERE p.id = ?

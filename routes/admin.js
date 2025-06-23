@@ -458,6 +458,25 @@ router.get('/transactions/balance', async (req, res) => {
     }
 });
 
+// GET TOP ENROLLED COURSE
+router.get('/top/course', async (req, res) => {
+  try {
+
+    // Fetch user info
+    const userSql = `
+      SELECT count(*) as total, c.title as title
+      FROM enrollments e
+      JOIN courses c ON c.id = e.course_id ORDER BY c.id DESC
+    `;
+    const [topCourses] = await pool.query(userSql, [req.user.id]);
+
+    res.json({ topCourses });
+  } catch (err) {
+    console.error('Error in Fetching Total Courses', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // send Mail
 router.post('/mail', async (req, res) => {
     const { header, subject, message, recipients } = req.body;
@@ -466,16 +485,17 @@ router.post('/mail', async (req, res) => {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
-
     try {
-        const info = await req.mailer.sendMail({
-            from: `"${header}" <${process.env.SMTP_USER}>`,
-            to: recipients.join(','),
-            subject,
-            html: message
-        });
+        recipients.forEach( async (email) => {
+             await req.mailer.sendMail({
+                from: `"${header}" <${process.env.SMTP_USER}>`,
+                to: email,
+                subject,
+                html: message
+            });
+        })
 
-        return res.status(200).json({ message: 'Email sent', info });
+        return res.status(200).json({ message: 'Emails sent successfully...'});
     } catch (error) {
         console.error('Error sending email:', error);
         return res.status(500).json({ error: 'Email sending failed' });

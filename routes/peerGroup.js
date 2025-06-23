@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 
+const { getTemplate } = require('../utils/emailTemplates');
+
 const checkEnrollment = require('../middleware/enroll')
 
 //Make sure the user is enrolled
@@ -17,14 +19,8 @@ const techAdjectives = [
   'serverless', 'smart', 'snappy', 'stateless', 'synthetic', 'virtual', 'zero-trust'
 ];
 
-const techNouns = [
-  'agent', 'api', 'array', 'bot', 'byte', 'circuit', 'cluster', 'component',
-  'compiler', 'daemon', 'data', 'dashboard', 'engine', 'endpoint', 'event',
-  'firewall', 'function', 'grid', 'hub', 'index', 'interface', 'kernel', 'lambda',
-  'loop', 'matrix', 'model', 'module', 'node', 'pipeline', 'port', 'protocol',
-  'query', 'repo', 'script', 'service', 'socket', 'stack', 'stream', 'switch',
-  'thread', 'token', 'vector', 'vm', 'widget'
-];
+const techNouns = [ 'Protocol', 'Script', 'Pixel', 'Matrix', 'Circuit', 'Stack', 'Cluster', 'Kernel', 'Cipher', 'Byte', 'Cache', 'Runtime', 'Compiler', 'Bot', 'Daemon', 'Module', 'Package', 'Patch', 'Protocol', 'Query', 'Algorithm', 'Repository', 'Interface', 'Network', 'Pipeline', 'Firmware', 'Browser', 'Server', 'Console', 'Firewall', 'Socket', 'Blockchain', 'App', 'Cloud', 'Terminal', 'Buffer', 'Registry', 'Session', 'Thread', 'Webhook', 'Framework', 'Model', 'Grid', 'Node', 'Core', 'Interface', 'Engine', 'Cluster', 'Gateway', 'Microservice', 'Workspace', 'Hyperlink', 'Switch', 'Bridge', 'Router', 'Forge', 'Studio', 'Sandbox', 'Lab', 'Hub', 'Deck', 'Beacon', 'Vault', 'Hive', 'Codebase'
+]
 
 function chunkArray(array, size) {
   const result = []
@@ -209,71 +205,106 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-//Automatically Assign Group...
+// Automatically Assign Group Across All Courses
 router.post('/', async (req, res) => {
   const conn = await pool.getConnection();
-
-    const groupsize = 4
+  const groupsize = 4;
 
   try {
-    // Step 1: Get users belonging to same learning track but not yet in any group
-    const [ungroupedUsers] = await conn.execute(`
-      SELECT u.id, p.fullname, u.email
+    // Step 1: Get all ungrouped students with course info
+    const [ungroupedStudents] = await conn.execute(`
+      SELECT u.id, p.fullname, u.email, e.course_id
       FROM users u
+      JOIN roles r ON u.role_id = r.id
       JOIN student_profiles p ON u.id = p.id
       JOIN enrollments e ON u.id = e.student_id
-      WHERE e.course_id = ? AND u.id NOT IN (
-        SELECT user_id FROM peer_group_members
-      )
-    `, [req.user.course_id]);
+      WHERE r.role = 'student'
+        AND u.id NOT IN (
+          SELECT user_id FROM peer_group_members
+        )
+    `);
 
-    if (ungroupedUsers.length < groupsize) {
-      return res.status(200).json({ message: 'Not enough users to form a new group.' });
+    if (ungroupedStudents.length < groupsize) {
+      return res.status(200).json({ message: 'Not enough ungrouped students to form a group.' });
     }
 
-    const chunks = chunkArray(ungroupedUsers, groupsize);
-    const createdGroups = [];
+    // Step 2: Group students by course_id
+    const studentsByCourse = ungroupedStudents.reduce((acc, student) => {
+      if (!acc[student.course_id]) acc[student.course_id] = []
+      acc[student.course_id].push(student)
+      return acc
+    }, {})
 
+    const createdGroups = []
     await conn.beginTransaction();
 
-    for (const groupUsers of chunks) {
-      if (groupUsers.length < groupsize) continue; // Optionally skip groups with fewer than 4
+    // Step 3: For each course, shuffle and form groups
+    for (const courseId in studentsByCourse) {
+      const students = studentsByCourse[courseId]
 
-      const leaderId = groupUsers[0].id;
-      const groupName = uniqueNamesGenerator({
-        dictionaries: [techAdjectives, techNouns],
-        separator: '-',
-        style: 'capital',
-      });
-
-      const [groupResult] = await conn.execute(
-        `INSERT INTO peer_groups (name, leader_id) VALUES (?, ?)`,
-        [groupName, leaderId]
-      );
-
-      const groupId = groupResult.insertId;
-
-      for (const user of groupUsers) {
-        await conn.execute(
-          `INSERT INTO peer_group_members (user_id, group_id) VALUES (?, ?)`,
-          [user.id, groupId]
-        );
+      // Shuffle using Fisher–Yates
+      for (let i = students.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[students[i], students[j]] = [students[j], students[i]]
       }
 
-      createdGroups.push({ id: groupId, name: groupName });
+      // Chunk students into groups
+      const chunks = chunkArray(students, groupsize)
+
+      for (const groupUsers of chunks) {
+        if (groupUsers.length < groupsize) continue;
+
+        const leaderId = groupUsers[0].id
+        const groupName = uniqueNamesGenerator({
+          dictionaries: [techAdjectives, techNouns],
+          separator: '-',
+          style: 'capital',
+        })
+
+        const [groupResult] = await conn.execute(
+          `INSERT INTO peer_groups (name, leader_id, course_id) VALUES (?, ?, ?)`,
+          [groupName, leaderId, courseId]
+        )
+
+        const groupId = groupResult.insertId
+
+        for (const student of groupUsers) {
+
+            //Make sure peer group has been formed before sending mails to user
+          await conn.execute(
+            `INSERT INTO peer_group_members (user_id, group_id) VALUES (?, ?)`,
+            [student.id, groupId]
+          )
+
+            // Send Email to Users...
+            const template = getTemplate('peer-group-allocation');
+            const html = template.replace('{{userName}}', student.email);
+
+            req.mailer.sendMail({
+                from: `"MerilLearn" <${process.env.SMTP_USER}>`,
+              to: user.email,
+              subject: 'You have been assigned to a peer group',
+              html,
+            }).catch(err => {
+              console.error('Mailer error:', err);
+            });
+        }
+
+        createdGroups.push({ id: groupId, name: groupName, course_id: courseId })
+      }
     }
 
-    await conn.commit();
-    res.status(201).json({ message: 'New groups formed', groups: createdGroups });
+    await conn.commit()
+    res.status(201).json({ message: 'Groups formed for all courses', groups: createdGroups })
 
   } catch (err) {
-    await conn.rollback();
-    console.error('Error grouping users:', err);
-    res.status(500).json({ message: 'Error grouping users' });
+    await conn.rollback()
+    console.error('Error grouping students across courses:', err)
+    res.status(500).json({ message: 'Error grouping students across courses' })
   } finally {
-    conn.release();
+    conn.release()
   }
-});
+})
 
 //User leave peer group...
 router.delete('/', async (req, res) => {
