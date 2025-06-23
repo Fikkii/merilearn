@@ -478,6 +478,30 @@ router.get('/top/course', async (req, res) => {
 });
 
 // send Mail
+router.post('/general-reminder', async (req, res) => {
+    const { header, subject, message, recipients } = req.body;
+
+    if (!subject || !header || !message || !Array.isArray(recipients)) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    try {
+        recipients.forEach( async (email) => {
+             await req.mailer.sendMail({
+                from: `"${header}" <${process.env.SMTP_USER}>`,
+                to: email,
+                subject,
+                html: message
+            });
+        })
+
+        return res.status(200).json({ message: 'Emails sent successfully...'});
+    } catch (error) {
+        console.error('Error sending email:', error);
+        return res.status(500).json({ error: 'Email sending failed' });
+    }});
+
+// send Mail
 router.post('/mail', async (req, res) => {
     const { header, subject, message, recipients } = req.body;
 

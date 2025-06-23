@@ -282,7 +282,7 @@ router.post('/', async (req, res) => {
 
             req.mailer.sendMail({
                 from: `"MerilLearn" <${process.env.SMTP_USER}>`,
-              to: user.email,
+              to: student.email,
               subject: 'You have been assigned to a peer group',
               html,
             }).catch(err => {
