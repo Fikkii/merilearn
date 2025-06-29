@@ -9,7 +9,7 @@ const checkEnrollment = require('../middleware/enroll')
 //Make sure the user is enrolled
 router.use(checkEnrollment)
 
-const { uniqueNamesGenerator, colors, animals } = require('unique-names-generator');
+const { uniqueNamesGenerator } = require('unique-names-generator');
 
 const techAdjectives = [
   'agile', 'async', 'binary', 'cloud', 'compact', 'composable', 'cyber',
@@ -106,6 +106,7 @@ router.get('/me', async (req, res) => {
         pg.name AS group_name,
         p.id AS leader_id,
         p.fullname AS leader_name,
+        p.phone AS leader_phone,
         u.email AS leader_email
       FROM peer_groups pg
       JOIN users u ON u.id = pg.leader_id
@@ -119,6 +120,7 @@ router.get('/me', async (req, res) => {
         pgm.group_id,
         u.id AS user_id,
         p.fullname,
+        p.phone,
         u.email
       FROM peer_group_members pgm
       JOIN users u ON pgm.user_id = u.id
@@ -128,14 +130,16 @@ router.get('/me', async (req, res) => {
 
     // Step 4: Combine leader and members
     const result = groups.map(group => {
-      const groupMembers = members.map(({ fullname, email }) => ({ fullname, email }));
+      const groupMembers = members.map(({ fullname, phone, email }) => ({ fullname, phone, email }));
 
       return {
         id: group.group_id,
         name: group.group_name,
+        phone: group.phone,
         leader: {
           name: group.leader_name,
-          email: group.leader_email
+          email: group.leader_email,
+          phone: group.leader_phone
         },
         members: groupMembers
       };

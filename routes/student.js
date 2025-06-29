@@ -13,7 +13,7 @@ const checkEnrollment = require('../middleware/enroll');
 router.get('/me', async (req, res) => {
   try {
         const sql = `
-          SELECT u.id, s.fullname, u.email, u.created_at
+          SELECT u.id, s.fullname, u.email, s.phone, u.created_at
           FROM users u
           JOIN student_profiles s ON s.id = u.id
           WHERE u.id = ?
@@ -34,40 +34,41 @@ router.get('/me', async (req, res) => {
 });
 
 router.put('/me', async (req, res) => {
-  const { fullname, password } = req.body;
+  const { fullname, password, phone } = req.body;
 
   if (!fullname && !password) {
     return res.status(400).json({ error: 'At least one field (name or password) must be provided' });
   }
 
   try {
-    const values = [];
-    let updateProfileSql = '';
-    let profileParams = [];
+        const fields = [];
+        const values = [];
 
-    // Update password if provided
-    if (password) {
-      const hashed = await bcrypt.hash(password, 10);
-      const updatePasswordSql = 'UPDATE users SET password = ? WHERE id = ?';
-      await pool.query(updatePasswordSql, [hashed, req.user.id]);
-    }
+        if (fullname) {
+            fields.push('fullname = ?');
+            values.push(fullname);
+        }
 
-    // Update fullname if provided
-    if (fullname) {
-      updateProfileSql = 'UPDATE student_profiles SET fullname = ? WHERE id = ?';
-      profileParams = [fullname, req.user.id];
+        if (password) {
+            fields.push('password = ?');
+            values.push(password);
+        }
 
-      const [result] = await pool.query(updateProfileSql, profileParams);
+        if (phone) {
+            fields.push('phone = ?');
+            values.push(phone);
+        }
 
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ error: 'Student not found or no changes made' });
-      }
-    }
+        values.push(req.user.id);
 
-    // If only password was updated, still send success
-    if (!fullname) {
-      return res.json({ message: 'Profile updated successfully' });
-    }
+        const [result] = await pool.execute(
+            `UPDATE student_profiles SET ${fields.join(', ')} WHERE id = ?`,
+            values
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Profile not found or no changes made' });
+        }
 
     res.json({ message: 'Profile updated successfully' });
   } catch (err) {

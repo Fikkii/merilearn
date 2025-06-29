@@ -11,6 +11,8 @@ const {checkPermission} = require('../middleware/checkPermission');
 //Middleware to upload file
 const { useUploader } = require('../middleware/upload.js');
 
+// Fetch HTML Email Template
+const { getTemplate } = require('../utils/emailTemplates');
 
 const router = express.Router();
 
@@ -509,13 +511,16 @@ router.post('/mail', async (req, res) => {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    const template = getTemplate('general-reminder');
+    let html = template.replace('{{content}}', message);
+
     try {
         recipients.forEach( async (email) => {
              await req.mailer.sendMail({
                 from: `"${header}" <${process.env.SMTP_USER}>`,
                 to: email,
                 subject,
-                html: message
+                html
             });
         })
 
