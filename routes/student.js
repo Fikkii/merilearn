@@ -13,9 +13,11 @@ const checkEnrollment = require('../middleware/enroll');
 router.get('/me', async (req, res) => {
   try {
         const sql = `
-          SELECT u.id, s.fullname, u.email, s.phone, u.created_at
+          SELECT u.id, s.fullname, u.email, s.phone, c.d_wlink as group_link, u.created_at
           FROM users u
           JOIN student_profiles s ON s.id = u.id
+          JOIN enrollments e ON e.student_id = u.id
+          JOIN courses c ON c.id = e.course_id
           WHERE u.id = ?
         `;
 
@@ -188,7 +190,6 @@ router.get('/course', async (req, res) => {
       WHERE course_id = ?
     `;
     const [modules] = await pool.query(modulesSql, [req.user.course_id]);
-      console.log(req.user.course_id)
 
     // For each module, get topics
     const topicSql = `

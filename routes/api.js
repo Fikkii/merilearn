@@ -55,7 +55,7 @@ router.get('/courses/details', async (req, res) => {
 router.get('/courses', async (req, res) => {
   try {
     const [courses] = await pool.execute(`
-      SELECT id, title, cover_img_url, description, price
+      SELECT id, title, cover_img_url, description, d_wlink, price
       FROM courses ORDER BY created_at DESC
     `);
 
@@ -72,7 +72,7 @@ router.get('/courses/:id', async (req, res) => {
 
   try {
     const [rows] = await pool.execute(`
-      SELECT id, title, cover_img_url, description, price
+      SELECT id, title, cover_img_url, description, price, d_wlink
       FROM courses WHERE id = ?
     `, [id]);
 

@@ -108,17 +108,18 @@ router.put('/topics/:id', async (req, res) => {
 
 // Create a course
 router.post('/courses', useUploader('/uploads/courses'), async (req, res) => {
-    const { title, price, description } = req.body;
+    const { title, price, description, d_wlink } = req.body;
 
     if (!title) return res.status(400).json({ error: 'title is required' });
 
     try {
-        const sql = 'INSERT INTO courses (title, cover_img_url, description, price) VALUES (?, ?, ?, ?)';
+        const sql = 'INSERT INTO courses (title, cover_img_url, description, price, d_wlink) VALUES (?, ?, ?, ?, ?)';
         const [result] = await pool.execute(sql, [
             title,
             req.file.uploadUrl,
             description || null,
-            price || null
+            price || null,
+            d_wlink || null
         ]);
 
         res.status(201).json({ message: 'Course created', courseId: result.insertId });
@@ -131,7 +132,7 @@ router.post('/courses', useUploader('/uploads/courses'), async (req, res) => {
 // Edit a course
 router.put('/courses/:id', useUploader('/uploads/courses'), async (req, res) => {
   const { id } = req.params;
-  const { title, price, description } = req.body;
+  const { title, price, description, d_wlink } = req.body;
 
   if (!title) return res.status(400).json({ error: 'title is required' });
 
@@ -150,8 +151,8 @@ router.put('/courses/:id', useUploader('/uploads/courses'), async (req, res) => 
       }
 
       const [result] = await pool.execute(
-          'UPDATE courses SET title = ?, cover_img_url = ?, description = ?, price = ? WHERE id = ?',
-          [title, req.file.uploadUrl, description || null, price, id]
+          'UPDATE courses SET title = ?, cover_img_url = ?, description = ?, price = ?, d_wlink = ? WHERE id = ?',
+          [title, req.file.uploadUrl, description || null, price, d_wlink || null, id]
       );
 
       res.status(201).json({ message: 'Course Edited Successfully', courseId: id });
