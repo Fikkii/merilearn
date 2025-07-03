@@ -16,8 +16,8 @@ router.get('/me', async (req, res) => {
           SELECT u.id, s.fullname, u.email, s.phone, c.d_wlink as group_link, u.created_at
           FROM users u
           JOIN student_profiles s ON s.id = u.id
-          JOIN enrollments e ON e.student_id = u.id
-          JOIN courses c ON c.id = e.course_id
+          LEFT JOIN enrollments e ON e.student_id = u.id
+          LEFT JOIN courses c ON c.id = e.course_id
           WHERE u.id = ?
         `;
 
