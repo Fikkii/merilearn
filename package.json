@@ -1,4 +1,7 @@
 {
+    "scripts": {
+        "start": "node server"
+    },
   "dependencies": {
     "@casl/ability": "^6.7.3",
     "@google/generative-ai": "^0.24.1",
