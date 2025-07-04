@@ -3,6 +3,10 @@ const express = require('express');
 const router = express.Router()
 const pool = require('../db')
 const axios = require('axios')
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+require('dotenv').config();
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 function parseAIResponse(aiResponse) {
   try {
@@ -68,10 +72,10 @@ router.post('/gemini', async (req, res) => {
   }
 
   try {
-    // Read the student's code from Google Drive link
+    // Read student code from Google Drive link
     const studentCode = await readGoogleDriveFileText(file_link);
 
-    // Fetch the project info including rubric and instructions
+    // Fetch project rubric and instructions
     const [projects] = await pool.execute(`
       SELECT p.id, p.title, p.instructions, p.rubric
       FROM projects p WHERE p.id = ?
@@ -83,8 +87,8 @@ router.post('/gemini', async (req, res) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    // Prepare the prompt for Gemini
-    const systemPrompt = `
+    // Combine system and user prompt into a single text prompt for Gemini
+    const gradingPrompt = `
 You are an expert programming instructor grading a student project.
 Use the rubric and instructions below to assess the student's submission.
 
@@ -105,9 +109,7 @@ ${project.instructions}
 
 Rubric:
 ${project.rubric}
-`;
 
-    const userPrompt = `
 Student's Submission:
 \`\`\`${file_type}
 ${studentCode}
@@ -117,35 +119,34 @@ ${studentCode}
     // Create Gemini model
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-    // Send the request to Gemini
-    const result = await model.generateContent([
-      { role: 'system', parts: [{ text: systemPrompt }] },
-      { role: 'user', parts: [{ text: userPrompt }] }
-    ]);
+    // Send prompt as a single content block
+    const result = await model.generateContent(gradingPrompt);
 
     const rawMessage = result.response.text();
 
-    // Parse AI response (make sure parseAIResponse handles JSON safely)
+    // Parse AI response to JSON
     const feedback = parseAIResponse(rawMessage);
     const score = feedback.score;
 
-    // Store evaluation in database
-    await pool.execute(`
-      INSERT INTO evaluations (student_id, project_id, file_link, score, feedback, grader)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-        file_link = VALUES(file_link),
-        score = VALUES(score),
-        feedback = VALUES(feedback),
-        grader = VALUES(grader)
-    `, [
-      req.user.id,
-      projectId,
-      file_link,
-      score,
-      JSON.stringify(feedback),
-      'gemini-2.0-flash'
-    ]);
+    const grader = 'gemini-2.0-flash';
+
+    // Store evaluation in DB
+      await pool.execute(`
+  INSERT INTO evaluations (student_id, project_id, file_link, score, feedback, grader)
+  VALUES (?, ?, ?, ?, ?, ?)
+  ON DUPLICATE KEY UPDATE
+    file_link = VALUES(file_link),
+    score = VALUES(score),
+    feedback = VALUES(feedback),
+    grader = VALUES(grader)
+`, [
+    req.user.id,
+    projectId,
+    file_link,
+    score,
+    JSON.stringify(feedback),
+    grader
+]);
 
     res.json(feedback);
   } catch (error) {
@@ -153,6 +154,7 @@ ${studentCode}
     res.status(500).json({ error: 'Error grading submission' });
   }
 });
+
 
 router.post('/', async (req, res) => {
   const { projectId, file_link, file_type } = req.body;
