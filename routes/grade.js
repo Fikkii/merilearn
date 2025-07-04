@@ -6,16 +6,9 @@ const axios = require('axios')
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
 
-const { google } = require('googleapis');
+const { GoogleAuth } = require('google-auth-library');
 
 const { extractAndConcatZip } = require('../utils/zipReader')
-
-const auth = new google.auth.GoogleAuth({
-  keyFile: 'service-account.json',
-  scopes: ['https://www.googleapis.com/auth/drive.readonly'],
-});
-
-const drive = google.drive({ version: 'v3', auth });
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -24,13 +17,32 @@ function extractFileId(link) {
   return match ? match[1] : null;
 }
 
+// Create auth client using service account
+const auth = new GoogleAuth({
+  keyFile: 'service-account.json',
+  scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+});
+
 async function readStudentFile(fileId) {
-  const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
+  // Get access token
+  const client = await auth.getClient();
+  const tokenResponse = await client.getAccessToken();
+  const accessToken = tokenResponse.token;
+
+  // Download file as stream
+  const response = await axios.get(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      responseType: 'stream'
+    }
+  );
+
   return new Promise((resolve, reject) => {
     let data = '';
-    res.data.on('data', chunk => data += chunk);
-    res.data.on('end', () => resolve(data));
-    res.data.on('error', reject);
+    response.data.on('data', chunk => data += chunk.toString());
+    response.data.on('end', () => resolve(data));
+    response.data.on('error', reject);
   });
 }
 

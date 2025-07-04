@@ -40,7 +40,6 @@ function authenticate(req, res, next){
     req.ability = defineAbilitiesFor(req.user);
     next();
   } catch(e) {
-    console.log(e)
     return res.status(403).json({ error: 'Invalid token' });
   }
 };
