@@ -9,12 +9,13 @@ require('dotenv').config();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 function getDirectDownloadLink(file_link) {
-  const match = file_link.match(/\/d\/([^/]+)\//);
+  const match = file_link.match(/\/d\/([^/]+)/);
   if (match) {
     return `https://drive.google.com/uc?export=download&id=${match[1]}`;
   }
   return file_link;
 }
+
 function parseAIResponse(aiResponse) {
   try {
     // Remove triple backticks and any leading "json" identifier
