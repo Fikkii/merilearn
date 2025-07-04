@@ -60,6 +60,100 @@ async function readGoogleDriveFileText(driveUrl) {
   }
 }
 
+router.post('/gemini', async (req, res) => {
+  const { projectId, file_link, file_type } = req.body;
+
+  if (!projectId || !file_link || !file_type) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    // Read the student's code from Google Drive link
+    const studentCode = await readGoogleDriveFileText(file_link);
+
+    // Fetch the project info including rubric and instructions
+    const [projects] = await pool.execute(`
+      SELECT p.id, p.title, p.instructions, p.rubric
+      FROM projects p WHERE p.id = ?
+    `, [projectId]);
+
+    const project = projects[0];
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Prepare the prompt for Gemini
+    const systemPrompt = `
+You are an expert programming instructor grading a student project.
+Use the rubric and instructions below to assess the student's submission.
+
+You must return a strict JSON response containing ONLY these fields:
+{
+  "score": percentage,
+  "project_strengths": JSON array,
+  "project_weakness": JSON array,
+  "alignment": JSON array,
+  "aoi": JSON array,
+  "final_assessment": JSON array
+}
+
+⚠️ Do NOT add anything else. Strictly return this JSON.
+
+Instructions:
+${project.instructions}
+
+Rubric:
+${project.rubric}
+`;
+
+    const userPrompt = `
+Student's Submission:
+\`\`\`${file_type}
+${studentCode}
+\`\`\`
+`;
+
+    // Create Gemini model
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    // Send the request to Gemini
+    const result = await model.generateContent([
+      { role: 'system', parts: [{ text: systemPrompt }] },
+      { role: 'user', parts: [{ text: userPrompt }] }
+    ]);
+
+    const rawMessage = result.response.text();
+
+    // Parse AI response (make sure parseAIResponse handles JSON safely)
+    const feedback = parseAIResponse(rawMessage);
+    const score = feedback.score;
+
+    // Store evaluation in database
+    await pool.execute(`
+      INSERT INTO evaluations (student_id, project_id, file_link, score, feedback, grader)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        file_link = VALUES(file_link),
+        score = VALUES(score),
+        feedback = VALUES(feedback),
+        grader = VALUES(grader)
+    `, [
+      req.user.id,
+      projectId,
+      file_link,
+      score,
+      JSON.stringify(feedback),
+      'gemini-2.0-flash'
+    ]);
+
+    res.json(feedback);
+  } catch (error) {
+    console.error('Grading error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Error grading submission' });
+  }
+});
+
 router.post('/', async (req, res) => {
   const { projectId, file_link, file_type } = req.body;
 
