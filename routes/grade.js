@@ -8,12 +8,27 @@ require('dotenv').config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-function getDirectDownloadLink(file_link) {
+async function fetchGoogleDriveFileText(file_link) {
+  // Extract file ID and build direct download link
   const match = file_link.match(/\/d\/([^/]+)/);
-  if (match) {
-    return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+  const directLink = match
+    ? `https://drive.google.com/uc?export=download&id=${match[1]}`
+    : file_link;
+
+  try {
+    const response = await axios.get(directLink);
+    const text = response.data;
+
+    // Optional: detect HTML preview (starts with "<")
+    if (typeof text === 'string' && text.trim().startsWith('<')) {
+      throw new Error('Downloaded file appears to be an HTML preview, not raw source code.');
+    }
+
+    return text;
+  } catch (error) {
+    console.error('❌ Failed to fetch file text:', error.message);
+    throw new Error('Unable to fetch file content from Google Drive.');
   }
-  return file_link;
 }
 
 function parseAIResponse(aiResponse) {
@@ -81,8 +96,7 @@ router.post('/gemini', async (req, res) => {
 
   try {
     // Read student code from Google Drive link
-    const directLink = getDirectDownloadLink(file_link);
-    const studentCode = await readGoogleDriveFileText(directLink);
+    const studentCode = await fetchGoogleDriveFileText(file_link);
 
     // Fetch project rubric and instructions
     const [projects] = await pool.execute(`
