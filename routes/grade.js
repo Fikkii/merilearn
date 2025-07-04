@@ -6,29 +6,32 @@ const axios = require('axios')
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
 
+const { google } = require('googleapis');
+
+const { extractAndConcatZip } = require('../utils/zipReader')
+
+const auth = new google.auth.GoogleAuth({
+  keyFile: 'service-account.json',
+  scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+});
+
+const drive = google.drive({ version: 'v3', auth });
+
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-async function fetchGoogleDriveFileText(file_link) {
-  // Extract file ID and build direct download link
-  const match = file_link.match(/\/d\/([^/]+)/);
-  const directLink = match
-    ? `https://drive.google.com/uc?export=download&id=${match[1]}`
-    : file_link;
+function extractFileId(link) {
+  const match = link.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  return match ? match[1] : null;
+}
 
-  try {
-    const response = await axios.get(directLink);
-    const text = response.data;
-
-    // Optional: detect HTML preview (starts with "<")
-    if (typeof text === 'string' && text.trim().startsWith('<')) {
-      throw new Error('Downloaded file appears to be an HTML preview, not raw source code.');
-    }
-
-    return text;
-  } catch (error) {
-    console.error('❌ Failed to fetch file text:', error.message);
-    throw new Error('Unable to fetch file content from Google Drive.');
-  }
+async function readStudentFile(fileId) {
+  const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
+  return new Promise((resolve, reject) => {
+    let data = '';
+    res.data.on('data', chunk => data += chunk);
+    res.data.on('end', () => resolve(data));
+    res.data.on('error', reject);
+  });
 }
 
 function parseAIResponse(aiResponse) {
@@ -96,22 +99,30 @@ router.post('/gemini', async (req, res) => {
 
   try {
     // Read student code from Google Drive link
-    const studentCode = await fetchGoogleDriveFileText(file_link);
 
-    // Fetch project rubric and instructions
-    const [projects] = await pool.execute(`
+      let studentCode = ''
+      const directLink = extractFileId(file_link);
+      studentCode = await readStudentFile(directLink);
+
+      if(file_type == 'zip'){
+          //read file as zip
+          studentCode = await extractAndConcatZip(directLink)
+      }
+
+      // Fetch project rubric and instructions
+      const [projects] = await pool.execute(`
       SELECT p.id, p.title, p.instructions, p.rubric
       FROM projects p WHERE p.id = ?
     `, [projectId]);
 
-    const project = projects[0];
+      const project = projects[0];
 
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
-    }
+      if (!project) {
+          return res.status(404).json({ error: 'Project not found' });
+      }
 
-    // Combine system and user prompt into a single text prompt for Gemini
-    const gradingPrompt = `
+      // Combine system and user prompt into a single text prompt for Gemini
+      const gradingPrompt = `
 You are an expert programming instructor grading a student project.
 Use the rubric and instructions below to assess the student's submission.
 
@@ -154,7 +165,7 @@ ${studentCode}
     const grader = 'gemini-2.0-flash';
 
     // Store evaluation in DB
-      await pool.execute(`
+    await pool.execute(`
   INSERT INTO evaluations (student_id, project_id, file_link, score, feedback, grader)
   VALUES (?, ?, ?, ?, ?, ?)
   ON DUPLICATE KEY UPDATE
@@ -171,36 +182,36 @@ ${studentCode}
     grader
 ]);
 
-    res.json(feedback);
+      res.json(feedback);
   } catch (error) {
-    console.error('Grading error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Error grading submission' });
+      console.error('Grading error:', error.response?.data || error.message);
+      res.status(500).json({ error: 'Error grading submission, Try again Later' });
   }
 });
 
 
 router.post('/', async (req, res) => {
-  const { projectId, file_link, file_type } = req.body;
+    const { projectId, file_link, file_type } = req.body;
 
-  if (!projectId || !file_link || !file_type) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
+    if (!projectId || !file_link || !file_type) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
 
-  try {
-    const studentCode = await readGoogleDriveFileText(file_link);
+    try {
+        const studentCode = await readGoogleDriveFileText(file_link);
 
-    const [projects] = await pool.execute(`
-      SELECT p.id, p.title, p.instructions, p.rubric
-      FROM projects p WHERE p.id = ?
-    `, [projectId]);
+        const [projects] = await pool.execute(`
+        SELECT p.id, p.title, p.instructions, p.rubric
+        FROM projects p WHERE p.id = ?
+            `, [projectId]);
 
     const project = projects[0];
 
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
-    }
+        if (!project) {
+            return res.status(404).json({ error: 'Project not found' });
+        }
 
-    const systemPrompt = `
+        const systemPrompt = `
 You are an expert programming instructor grading a student project.
 Use the rubric and instructions below to assess the student's submission.
 
@@ -222,38 +233,38 @@ Rubric:
 ${project.rubric}
 `;
 
-    const userPrompt = `
-Student's Submission:
-\`\`\`${file_type}
+        const userPrompt = `
+        Student's Submission:
+            \`\`\`${file_type}
 ${studentCode}
 \`\`\`
 `;
 
-    const grader = 'deepseek/deepseek-r1-0528:free';
+        const grader = 'deepseek/deepseek-r1-0528:free';
 
-    const response = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      {
-        model: grader,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.3
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+        const response = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+            {
+                model: grader,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ],
+                temperature: 0.3
+            },
+            {
+                headers: {
+                    'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
 
-    const rawMessage = response.data.choices[0].message.content;
-    const feedback = parseAIResponse(rawMessage);
-    const score = feedback.score;
+        const rawMessage = response.data.choices[0].message.content;
+        const feedback = parseAIResponse(rawMessage);
+        const score = feedback.score;
 
-      await pool.execute(`
+        await pool.execute(`
   INSERT INTO evaluations (student_id, project_id, file_link, score, feedback, grader)
   VALUES (?, ?, ?, ?, ?, ?)
   ON DUPLICATE KEY UPDATE
@@ -270,11 +281,11 @@ ${studentCode}
     grader
 ]);
 
-      res.json(feedback);
-  } catch (error) {
-      console.error('Grading error:', error.response?.data || error.message);
-      res.status(500).json({ error: 'Error grading submission' });
-  }
+        res.json(feedback);
+    } catch (error) {
+        console.error('Grading error:', error.response?.data || error.message);
+        res.status(500).json({ error: 'Error grading submission, try later' });
+    }
 });
 
 module.exports = router
