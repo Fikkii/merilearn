@@ -10,6 +10,10 @@ const { GoogleAuth } = require('google-auth-library');
 
 const { extractAndConcatZip } = require('../utils/zipReader')
 
+const checkEnrollment = require('../middleware/enroll')
+
+router.use(checkEnrollment)
+
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 function extractFileId(link) {
@@ -162,6 +166,8 @@ ${studentCode}
 \`\`\`
 `;
 
+      console.log(req.user.course_id)
+
     // Create Gemini model
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
@@ -178,16 +184,18 @@ ${studentCode}
 
     // Store evaluation in DB
     await pool.execute(`
-  INSERT INTO evaluations (student_id, project_id, file_link, score, feedback, grader)
-  VALUES (?, ?, ?, ?, ?, ?)
+  INSERT INTO evaluations (student_id, project_id, course_id, file_link, score, feedback, grader)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
   ON DUPLICATE KEY UPDATE
     file_link = VALUES(file_link),
+    course_id = VALUES(course_id),
     score = VALUES(score),
     feedback = VALUES(feedback),
     grader = VALUES(grader)
 `, [
     req.user.id,
     projectId,
+    req.user.course_id,
     file_link,
     score,
     JSON.stringify(feedback),
@@ -213,7 +221,7 @@ router.post('/', async (req, res) => {
         const studentCode = await readGoogleDriveFileText(file_link);
 
         const [projects] = await pool.execute(`
-        SELECT p.id, p.title, p.instructions, p.rubric
+        SELECT p.id, p.title, p.course_id, p.instructions, p.rubric
         FROM projects p WHERE p.id = ?
             `, [projectId]);
 
@@ -277,16 +285,18 @@ ${studentCode}
         const score = feedback.score;
 
         await pool.execute(`
-  INSERT INTO evaluations (student_id, project_id, file_link, score, feedback, grader)
-  VALUES (?, ?, ?, ?, ?, ?)
+  INSERT INTO evaluations (student_id, project_id, course_id, file_link, score, feedback, grader)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
   ON DUPLICATE KEY UPDATE
     file_link = VALUES(file_link),
     score = VALUES(score),
+    course_id = VALUES(course_id),
     feedback = VALUES(feedback),
     grader = VALUES(grader)
 `, [
     req.user.id,
     projectId,
+    req.user.course_id,
     file_link,
     score,
     JSON.stringify(feedback),

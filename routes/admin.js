@@ -270,7 +270,7 @@ router.put('/modules/:id', async (req, res) => {
 
 //create a project
 router.post('/projects', async (req, res) => {
-    const { title, moduleId, instructions, content, rubric } = req.body;
+    const { title, moduleId, courseId, instructions, content, rubric } = req.body;
 
     if (!title || !moduleId || !instructions || !rubric) {
         return res.status(400).json({ error: 'module_id, instructions, rubric and title are required' });
@@ -278,8 +278,8 @@ router.post('/projects', async (req, res) => {
 
     try {
         const [result] = await pool.execute(
-            'INSERT INTO projects (title, module_id, instructions, project_hint, rubric) VALUES (?, ?, ?, ?, ?)',
-            [title, moduleId, instructions || null, content || null, rubric]
+            'INSERT INTO projects (title, module_id, course_id, instructions, project_hint, rubric) VALUES (?, ?, ?, ?, ?, ?)',
+            [title, moduleId, courseId, instructions || null, content || null, rubric]
         );
         res.status(201).json({ message: 'Project created successfully', id: result.insertId });
     } catch (err) {

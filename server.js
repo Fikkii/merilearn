@@ -63,6 +63,28 @@ app.get('/courses/details', async (req, res) => {
   }
 });
 
+app.get('/metrics', async (req, res) => {
+  try {
+    const [result] = await pool.execute(`
+      SELECT COUNT(*) AS total FROM courses
+    `);
+
+    const [users] = await pool.execute(`
+      SELECT COUNT(*) AS total FROM users
+    `);
+
+    const [projects] = await pool.execute(`
+      SELECT COUNT(*) AS total FROM projects
+    `);
+
+    res.json({ total_courses: result[0].total, total_users: users[0].total,  total_projects: projects[0].total   });
+  } catch (err) {
+    console.error('Failed to fetch total courses:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
 app.use('/api', apiRoutes);
 app.use('/ebooks', ebookRoutes);
 
