@@ -1,4 +1,5 @@
 node_modules
+copy.env
 .env
 todosCopy.db
 service-account.json
