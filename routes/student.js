@@ -9,6 +9,30 @@ const { getTemplate } = require('../utils/emailTemplates');
 
 const checkEnrollment = require('../middleware/enroll');
 
+// User onboarding...
+router.post('/onboarding', async (req, res) => {
+  const { fullname, phone, heardFrom, occupation } = req.body;
+
+  if (!fullname || !phone || !heardFrom || !occupation) {
+    return res.status(400).json({ error: 'All fields are required' });
+  }
+
+  try {
+    // assuming you have user ID from auth middleware
+    const userId = req.user.id;
+
+    await pool.query(
+      'INSERT INTO student_profiles (id, fullname, phone, heard_from, occupation) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE fullname=?, phone=?, heard_from=?, occupation=?',
+      [userId, fullname, phone, heardFrom, occupation, fullname, phone, heardFrom, occupation]
+    );
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 //user profile
 router.get('/me', async (req, res) => {
   try {

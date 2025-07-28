@@ -1,0 +1,15 @@
+GEMINI_API_KEY=AIzaSyASGG17UOTerarTzCYoU5FvHyHOpT1SR4g
+GOOGLE_CLIENT_ID=1078148364649-8v697i1oo9e37j36flapdsqca8893ne4.apps.googleusercontent.com
+JWT_SECRET=whatdoyousayistheworthofaboy
+PAYSTACK_SECRET_KEY=sk_test_4a8d8156cc2e87475a606841b6339381a1c30d80
+FRONTEND_PASSWORD_RESET_URL=http://merilearn.com.ng/reset-password
+SMTP_HOST=merilearn.com.ng
+SMTP_PORT=465
+SMTP_USER=support@merilearn.com.ng
+SMTP_PASS=mydadaskedmetoprepare
+OPENROUTER_API_KEY=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
+
+MYSQL_HOST=merilearn.com.ng
+MYSQL_USER=erilear_root
+MYSQL_PASSWORD=mydadaskedmetoprepare
+MYSQL_DATABASE=merilear_merilearn

@@ -35,6 +35,7 @@ app.post('/upload', useUploader(), (req, res) => {
 
 // Fetch course details
 app.get('/courses/details', async (req, res) => {
+    const courseId = req.query.courseId
   try {
     const [modules] = await pool.query(`SELECT * FROM modules`);
     const [courses] = await pool.query(`
@@ -51,10 +52,16 @@ app.get('/courses/details', async (req, res) => {
     });
 
     // Group modules under their respective courses
-    const courseDetail = courses.map(course => {
+    var courseDetail = courses.map(course => {
       const filteredModules = modulesWithTopics.filter(mod => mod.course_id === course.id);
       return { ...course, modules: filteredModules };
     });
+
+      if ( courseId ){
+          courseDetail = courseDetail.filter(value => (value.id == courseId))
+          return res.json(...courseDetail);
+          console.log(courseId)
+      }
 
     res.json(courseDetail);
   } catch (err) {

@@ -153,11 +153,62 @@ router.get('/topics', async (req, res) => {
   }
 });
 
-//Fetch single topic
+// Securely fetch a single topic with completion validation
 router.get('/topics/:id', async (req, res) => {
   const { id } = req.params;
+  const userId = req.user?.id; // Ensure this is populated by your auth middleware
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized access' });
+  }
+
   try {
-    const [rows] = await pool.execute(`
+    // 1. Fetch the current topic's module and course info
+    const [[currentTopic]] = await pool.execute(`
+      SELECT t.id, t.module_id, m.course_id
+      FROM topics t
+      JOIN modules m ON m.id = t.module_id
+      WHERE t.id = ?
+    `, [id]);
+
+    if (!currentTopic) {
+      return res.status(404).json({ error: 'Topic not found' });
+    }
+
+    const { module_id, course_id } = currentTopic;
+
+    // 2. Get all topic IDs in this course ordered by module and topic position
+    const [allTopics] = await pool.execute(`
+      SELECT t.id
+      FROM topics t
+      JOIN modules m ON m.id = t.module_id
+      WHERE m.course_id = ?
+      ORDER BY m.id ASC, t.id ASC
+    `, [course_id]);
+
+    const topicIds = allTopics.map(row => row.id);
+    const currentIndex = topicIds.indexOf(Number(id));
+
+    // 3. If it's not the first topic, check if the previous is completed
+    if (currentIndex > 0) {
+      const previousId = topicIds[currentIndex - 1];
+
+      const [[isCompleted]] = await pool.execute(`
+        SELECT 1 FROM completed_topics
+        WHERE topic_id = ? AND user_id = ?
+      `, [previousId, userId]);
+
+      if (!isCompleted) {
+        return res.status(403).json({
+          error: 'Access denied. Please complete the previous topic first.',
+          locked: true,
+          previousTopicId: previousId
+        });
+      }
+    }
+
+    // 4. Return topic info
+    const [[topic]] = await pool.execute(`
       SELECT
         t.id,
         t.title AS title,
@@ -165,14 +216,17 @@ router.get('/topics/:id', async (req, res) => {
         t.recommended_video AS recommended_video,
         m.title AS module_title,
         c.title AS course_title,
-        m.id AS moduleId
+        m.id AS moduleId,
+        EXISTS (
+          SELECT 1 FROM completed_topics WHERE topic_id = t.id AND user_id = ?
+        ) AS is_completed
       FROM topics t
       JOIN modules m ON m.id = t.module_id
       JOIN courses c ON c.id = m.course_id
       WHERE t.id = ?
-    `, [id]);
+    `, [userId, id]);
 
-    res.json(rows[0] || {});
+    res.json(topic);
   } catch (err) {
     console.error('Failed to fetch topic:', err);
     res.status(500).json({ error: 'Internal server error' });
